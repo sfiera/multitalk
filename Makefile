@@ -2,6 +2,7 @@ CC=gcc
 SRCS=toofar.c kwai.c
 OBJS=$(subst .c,.o,$(SRCS))
 EXES=$(subst .c,,$(SRCS))
+#CFLAGS=-DDEBUG=1
 
 all: $(EXES)
 
