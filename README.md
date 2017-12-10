@@ -10,6 +10,12 @@ Here's the bad part(s), this allows anyone to send anything at all onto your net
 
 The server itself should only interact with clients, so running that on a network without AppleTalk is fine.
 
+## Prerequisites
+
+On ubuntu, you need libpcap which can be installed by running:
+
+`sudo apt-get install libpcap-dev`
+
 # Usage
 
 If that didn't scare you away, here's how to run it.
