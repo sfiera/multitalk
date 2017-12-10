@@ -304,6 +304,7 @@ playitagain:
 		if( buffer ) free(buffer);
 
 	}
+	return 0;
 }
 
 void usage(char *progname) {
