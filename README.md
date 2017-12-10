@@ -14,7 +14,7 @@ The server itself should only interact with clients, so running that on a networ
 
 On ubuntu, you need libpcap which can be installed by running:
 
-`sudo apt-get install libpcap-dev`
+	sudo apt-get install libpcap-dev
 
 # Usage
 
@@ -30,13 +30,13 @@ Here is the example use:
 
 On a machine accessible from all the desired bridges:
 
-`./kwai [-d] [-p port#]`
+	./kwai [-d] [-p port#]
 
 On each bridge:
 
-`./toofar [-i interface] [-s server] [-p port]`
+	./toofar [-i interface] [-s server] [-p port]
 
-## Troubleshooting:
+## Notes
 
 The server has been tested to run on Ubuntu Linux and Mac OS X.  The bridges are only tested on Ubuntu, but theoretically should work anywhere libpcap supports packet injection.
 
@@ -55,4 +55,34 @@ This uses libpcap to do the packet capture and injection.  pcap includes the fol
 > on  platforms  that  do  nominally  support  sending completely raw and
 > unchanged packets.
 
+## Troubleshooting
+
+The first thing to do when troubleshooting is build both client and server with debugging enabled and run them in the foreground:
+
+	make clean; make CFLAGS="-DDEBUG=1"
+	./kwai -d
+	sudo ./toofar -d -i eth0 -s servername
+
+Next, if you have another machine on the network with netatalk installed (remember, you can't run this on a machine the client is running on), run `nbplkup`. This should show the machines visible on the network:
+
+	bbraun@bbraun-desktop:~/abridge$ nbplkup
+	                 bbraun-desktop:AFPServer                          65280.34:128
+	                 bbraun-desktop:netatalk                           65280.34:4
+	                 bbraun-desktop:Workstation                        65280.34:4
+	                         server:ProDOS16 Image                     65280.1:236
+	                         server:Apple //gs                         65280.1:236
+	                         server:Apple //e Boot                     65280.1:236
+	                         server:AFPServer                          65280.1:251
+	                         server:  Macintosh                        65280.1:252
+	                         server:Workstation                        65280.1:4
+
+And finally, tcpdump or ethereal to log/inspect the network can be helpful. 
+
+When reporting a problem, the debug output of both the server and client (or only client if you're connecting to a server you can't get the output of) and a tcpdump capture file of the problem:
+
+	tcpdump -n -i eth0 -s0 -w outfile atalk or aarp
+
+Running tcpdump on the same host as the client is ok.
+
+--
 Rob Braun [<bbraun@synack.net>](mailto:bbraun@synack.net)
