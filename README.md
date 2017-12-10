@@ -84,5 +84,21 @@ When reporting a problem, the debug output of both the server and client (or onl
 
 Running tcpdump on the same host as the client is ok.
 
+If you run it on a wireless interface on ubuntu or a Raspberry Pi, you need to set it into `monitor` mode ([more info](https://sandilands.info/sgordon/capturing-wifi-in-monitor-mode-with-iw)):
+
+	$ iw dev
+	phy#0
+	Interface wlan0
+		ifindex 3
+		type managed
+	$ sudo iw phy phyN interface add mon0 type monitor
+
+where `phyN` is the `phy` your `wlan0` interface is on.  In the example, `phy#0` should be entered as `phy0`.
+
+If your wireless interface doesn't support monitoring, you'll see something like:
+
+	sudo iw phy phy0 interface add mon0 type monitor
+	command failed: Operation not supported (-95)
+
 --
 Rob Braun [<bbraun@synack.net>](mailto:bbraun@synack.net)
