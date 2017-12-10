@@ -38,6 +38,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
 
@@ -188,17 +189,17 @@ int main(int argc, char *argv[]) {
 	int inuse = 0;
 	pid_t pid;
 	struct option o[] = {
-		{"dontfork", 0, 0, 'd'},
-		{"port", 1, 0, 'p'},
-		{"version", 0, 0, 'v'},
-		{"help", 0, 0, 'h'}
+		{"dontfork", no_argument, 0, 'd'},
+		{"help", no_argument, 0, 'h'},
+		{"port", required_argument, 0, 'p'},
+		{"version", no_argument, 0, 'v'},
+		{0, 0, 0, 0}
 	};
 	char c;
-	int loptind = 0;
 	int dontfork = 0;
 	char *portstr = "9999";
 
-	while( (c = getopt_long(argc, argv, "dhp:v", o, &optind)) != -1 ) {
+	while( (c = getopt_long(argc, argv, "dhp:v", o, 0)) != (char)-1) {
 		switch(c) {
 		case 'd':
 			dontfork = 1;

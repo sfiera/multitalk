@@ -39,6 +39,7 @@
 #include <netdb.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/queue.h>
 
 #define VERSION "abridge 0.1"
@@ -320,22 +321,22 @@ void usage(char *progname) {
 
 int main(int argc, char *argv[]) {
 	struct option o[] = {
-		{"dontfork", 0, 0, 'd'},
-		{"interface", 1, 0, 'i'},
-		{"help", 0, 0, 'h'},
-		{"server", 1, 0, 's'},
-		{"version", 0, 0, 'v'},
-		{"port", 1, 0, 'p'}
+		{"dontfork", no_argument, 0, 'd'},
+		{"help", no_argument, 0, 'h'},
+		{"interface", required_argument, 0, 'i'},
+		{"port", required_argument, 0, 'p'},
+		{"server", required_argument, 0, 's'},
+		{"version", no_argument, 0, 'v'},
+		{0, 0, 0, 0}
 	};
 	char c;
-	int loptind = 0;
 	char *dev = NULL;
 	char *server = "127.0.0.1";
 	char *port = "9999";
 	int dontfork = 0;
 	pid_t pid;
 
-	while( (c = getopt_long(argc, argv, "dhi:p:s:v", o, &optind)) != -1 ) {
+	while( (c = getopt_long(argc, argv, "dhi:p:s:v", o, 0)) != (char)-1 ) {
 		switch(c) {
 		case 'd':
 			dontfork = 1;
@@ -367,8 +368,7 @@ int main(int argc, char *argv[]) {
 		case 'h':
 			usage(argv[0]);
 			exit(0);
-			break;
-		};
+		}
 	}
 
 	// Daemonize
