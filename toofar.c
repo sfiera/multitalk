@@ -319,7 +319,12 @@ void usage(char *progname) {
 	fprintf(stderr, "-h | --help                   This message\n");
 }
 
-int main(int argc, char *argv[]) {
+char *dev = NULL;
+char *server = "127.0.0.1";
+char *port = "9999";
+int dontfork = 0;
+
+void parse_opts(int argc, char *argv[]) {
 	struct option o[] = {
 		{"dontfork", no_argument, 0, 'd'},
 		{"help", no_argument, 0, 'h'},
@@ -330,11 +335,6 @@ int main(int argc, char *argv[]) {
 		{0, 0, 0, 0}
 	};
 	char c;
-	char *dev = NULL;
-	char *server = "127.0.0.1";
-	char *port = "9999";
-	int dontfork = 0;
-	pid_t pid;
 
 	while( (c = getopt_long(argc, argv, "dhi:p:s:v", o, 0)) != (char)-1 ) {
 		switch(c) {
@@ -370,6 +370,10 @@ int main(int argc, char *argv[]) {
 			exit(0);
 		}
 	}
+}
+
+void run() {
+	pid_t pid;
 
 	// Daemonize
 	if( !dontfork ) {
@@ -438,4 +442,9 @@ int main(int argc, char *argv[]) {
 
 	void *valueptr = NULL;
 	pthread_join(capture_thread, &valueptr);
+}
+
+int main(int argc, char *argv[]) {
+    parse_opts(argc, argv);
+    run();
 }
