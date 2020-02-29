@@ -48,9 +48,6 @@ var (
 	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
 	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
-
-	localPacketMu sync.Mutex
-	localPackets  [][]byte
 )
 
 type (
@@ -193,12 +190,15 @@ func TCPServer(server string) (*Interface, error) {
 }
 
 func EtherTalk(dev string) (*Interface, error) {
-	recvCh, err := capture(dev)
+	localPacketMu := sync.Mutex{}
+	localPackets := [][]byte{}
+
+	recvCh, err := capture(dev, &localPacketMu, &localPackets)
 	if err != nil {
 		return nil, err
 	}
 
-	sendCh, err := transmit(dev)
+	sendCh, err := transmit(dev, &localPacketMu, &localPackets)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func EtherTalk(dev string) (*Interface, error) {
 	}, nil
 }
 
-func capture(dev string) (<-chan []byte, error) {
+func capture(dev string, mu *sync.Mutex, localPackets *[][]byte) (<-chan []byte, error) {
 	ch := make(chan []byte)
 
 	// DebugLog("Using device: %s\n", dev)
@@ -240,29 +240,35 @@ func capture(dev string) (<-chan []byte, error) {
 			if ci.CaptureLength != ci.Length {
 				// DebugLog("truncated packet! %s\n", "");
 			}
-			packet_handler(send, data, localAddrs)
+			packet_handler(send, data, localAddrs, mu, localPackets)
 		}
 	}(ch)
 	return ch, nil
 }
 
-func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool) {
+func packet_handler(
+	send chan<- []byte,
+	packet []byte,
+	localAddrs map[addr]bool,
+	mu *sync.Mutex,
+	localPackets *[][]byte,
+) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
-	localPacketMu.Lock()
-	for i, np := range localPackets {
+	mu.Lock()
+	for i, np := range *localPackets {
 		if bytes.Compare(np, packet) == 0 {
-			last := len(localPackets) - 1
-			localPackets[i] = localPackets[last]
-			localPackets = localPackets[:last]
-			localPacketMu.Unlock()
+			last := len(*localPackets) - 1
+			(*localPackets)[i] = (*localPackets)[last]
+			*localPackets = (*localPackets)[:last]
+			mu.Unlock()
 			// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
 			return
 		}
 	}
-	localPacketMu.Unlock()
+	mu.Unlock()
 
 	// anything less than this isn't a valid frame
 	if len(packet) < 18 {
@@ -287,7 +293,7 @@ func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool)
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(dev string) (chan<- []byte, error) {
+func transmit(dev string, mu *sync.Mutex, localPackets *[][]byte) (chan<- []byte, error) {
 	ch := make(chan []byte)
 
 	// DebugLog("Using device: %s\n", dev);
@@ -300,9 +306,9 @@ func transmit(dev string) (chan<- []byte, error) {
 		for packet := range recv {
 			// printBuffer(packet)
 			// We now have a frame, time to send it out.
-			localPacketMu.Lock()
-			localPackets = append(localPackets, packet)
-			localPacketMu.Unlock()
+			mu.Lock()
+			*localPackets = append(*localPackets, packet)
+			mu.Unlock()
 
 			err = handle.WritePacketData(packet)
 			// DebugLog("pcap_sendpacket returned %d\n", pret);
