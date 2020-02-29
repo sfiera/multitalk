@@ -57,16 +57,6 @@ package main
 //     TAILQ_ENTRY(packet) entries;
 // };
 //
-// void print_buffer(uint8_t *buffer, size_t len) {
-// #ifdef DEBUG
-//     size_t i;
-//     for(i = 0; i < len; i++) {
-//         printf("%.2x", buffer[i]);
-//     }
-//     printf("\n");
-// #endif
-// }
-//
 // void tailq_remove_packet(struct packet *np) {
 //     TAILQ_REMOVE(&packethead, np, entries);
 // }
@@ -80,16 +70,12 @@ package main
 // void tailq_init() {
 //     TAILQ_INIT(&packethead);
 // }
-//
-// uint16_t frame_type(const uint8_t *packet) {
-//     return htons(*(uint16_t*)(packet + 20));
-// }
 import "C"
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"os"
-	"syscall"
 	"unsafe"
 
 	"github.com/google/gopacket/pcap"
@@ -98,8 +84,7 @@ import (
 
 var (
 	dev     = pflag.StringP("interface", "i", "", "Specify the interface to bridge to")
-	server  = pflag.StringP("server", "s", "127.0.0.1", "Specify the server to connect to")
-	port    = pflag.StringP("port", "p", "9999", "Specify the port number to connect to")
+	server  = pflag.StringP("server", "s", "127.0.0.1:9999", "Specify the server to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 )
 
@@ -119,47 +104,29 @@ func main() {
 	}
 
 	ch := make(chan bool)
-	socket := initialize()
+	conn := initialize()
 	go func() {
 		defer close(ch)
-		capture(socket)
+		capture(conn)
 	}()
 	go func() {
-		transmit(socket)
+		transmit(conn)
 	}()
 	<-ch
 }
 
-func initialize() (socket int) {
-	hints := C.struct_addrinfo{
-		ai_family:   C.PF_INET,
-		ai_socktype: C.SOCK_STREAM,
-		ai_protocol: C.IPPROTO_TCP,
+func initialize() net.Conn {
+	conn, err := net.Dial("tcp", *server)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial %s: %s\n", *server, err.Error())
+		os.Exit(1)
 	}
-	res := (*C.struct_addrinfo)(nil)
-
-	if C.getaddrinfo(C.CString(*server), C.CString(*port), &hints, &res) != 0 {
-		fmt.Fprintf(os.Stderr, "Unknown hostname: %s\n", server)
-		os.Exit(5)
-	}
-
-	serverfd := C.socket(C.PF_INET, C.SOCK_STREAM, 0)
-	if serverfd < 0 {
-		fmt.Fprintf(os.Stderr, "socket call failed\n")
-		os.Exit(6)
-	}
-
-	if C.connect(serverfd, res.ai_addr, (C.socklen_t)(C.sizeof_struct_sockaddr_in)) != 0 {
-		fmt.Fprintf(os.Stderr, "connect failed\n")
-		os.Exit(7)
-	}
-
 	C.pthread_mutex_init(&C.qumu, nil)
 	C.tailq_init()
-	return int(serverfd)
+	return conn
 }
 
-func capture(serverfd int) {
+func capture(conn net.Conn) {
 	// DebugLog("Using device: %s\n", dev)
 	handle, err := pcap.OpenLive(*dev, 4096, true, pcap.BlockForever)
 	if err != nil {
@@ -190,11 +157,11 @@ func capture(serverfd int) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		packet_handler(serverfd, ci.CaptureLength, data, localAddrs)
+		packet_handler(conn, ci.CaptureLength, data, localAddrs)
 	}
 }
 
-func packet_handler(serverfd int, len int, packet []byte, localAddrs map[addr]bool) {
+func packet_handler(conn net.Conn, len int, packet []byte, localAddrs map[addr]bool) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
@@ -233,14 +200,12 @@ func packet_handler(serverfd int, len int, packet []byte, localAddrs map[addr]bo
 	// the source address to our list.
 	localAddrs[srcAddr(packet)] = true
 
-	netlen := [4]byte{}
-	binary.BigEndian.PutUint32(netlen[:], uint32(len))
-	C.write(C.int(serverfd), unsafe.Pointer(&netlen[0]), 4)
-	C.write(C.int(serverfd), unsafe.Pointer(&packet[0]), C.size_t(len))
+	_ = binary.Write(conn, binary.BigEndian, len)
+	_, _ = conn.Write(packet)
 	// DebugLog("Wrote packet of size %d\n", len)
 }
 
-func transmit(serverfd int) {
+func transmit(conn net.Conn) {
 	//char errbuf[PCAP_ERRBUF_SIZE];
 
 	// DebugLog("Using device: %s\n", dev);
@@ -252,85 +217,54 @@ func transmit(serverfd int) {
 
 	for {
 		// receive a frame and send it out on the net
-		len := uint32(0)
-		numread := uint32(0)
-		lenBuf := [4]byte{}
+		length := uint32(0)
 
-		for loop := true; loop; loop = numread < 4 {
-			r, err := C.read(C.int(serverfd), unsafe.Pointer(&lenBuf[numread]), C.size_t(4-numread))
-			if (r == -1) && (err == syscall.EINTR) {
-				continue
-			}
-			if r <= 0 {
-				C.perror(C.CString("read"))
-				os.Exit(1)
-				continue
-			}
-			numread += uint32(r)
+		err := binary.Read(conn, binary.BigEndian, &length)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+			os.Exit(1)
 		}
 
-		len = binary.BigEndian.Uint32(lenBuf[:])
-		if len > 4096 {
-			fmt.Fprintf(os.Stderr, "Received length is invalid: %u vs %u\n", len)
+		if length > 4096 {
+			fmt.Fprintf(os.Stderr, "Received length is invalid: %u vs %u\n", length)
 			continue
 		}
-		// DebugLog("receiving packet of length: %u\n", len);
+		// DebugLog("receiving packet of length: %u\n", length);
 
-		packetBuf := (*C.uint8_t)(C.calloc(1, C.size_t(len)))
-		if packetBuf == nil {
-			os.Exit(99)
-		}
-
-		numread = 0
-		for loop := true; loop; loop = numread < len {
-			r, err := C.read(C.int(serverfd), unsafe.Pointer(packetBuf), C.size_t(len-numread))
-			if (r == -1) && (err == syscall.EINTR) {
-				continue
-			}
-			if r <= 0 {
-				C.perror(C.CString("read"))
-				os.Exit(1)
-				if packetBuf != nil {
-					C.free(unsafe.Pointer(packetBuf))
-				}
-				continue
-			}
-			numread += uint32(r)
+		packet := make([]byte, length)
+		_, err = conn.Read(packet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+			os.Exit(1)
 		}
 		// DebugLog("Successfully received packet\n%s", "");
 
-		C.print_buffer(packetBuf, C.size_t(len))
+		// printBuffer(packet)
 
 		/* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
-		if len < 26 {
+		if length < 26 {
 			// Too short to be a valid ethernet frame
-			if packetBuf != nil {
-				C.free(unsafe.Pointer(packetBuf))
-			}
 			continue
 		}
 
 		// Verify this is actuall an AppleTalk related frame we've
 		// received, in a vague attempt at not polluting the network
 		// with unintended frames.
-		frameType := frameType(C.GoBytes(unsafe.Pointer(packetBuf), C.int(len)))
+		frameType := frameType(packet)
 		// DebugLog("Packet frame type: %x\n", type);
 		if !((frameType == 0x809b) || (frameType == 0x80f3)) {
 			// Not an appletalk or aarp frame, drop it.
 			// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", frameType);
-			if packetBuf != nil {
-				C.free(unsafe.Pointer(packetBuf))
-			}
 			continue
 		}
 
 		// We now have a frame, time to send it out.
 		lastsent := (*C.struct_packet)(C.calloc(1, C.sizeof_struct_packet))
-		lastsent.buffer = packetBuf
-		lastsent.len = C.size_t(len)
+		lastsent.buffer = (*C.uint8_t)(C.CBytes(packet))
+		lastsent.len = C.size_t(length)
 		C.tailq_insert_packet(lastsent)
 
-		err := handle.WritePacketData(C.GoBytes(unsafe.Pointer(packetBuf), C.int(len)))
+		err = handle.WritePacketData(packet)
 		// DebugLog("pcap_sendpacket returned %d\n", pret);
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
