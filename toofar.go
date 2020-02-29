@@ -101,8 +101,6 @@ var (
 	server  = pflag.StringP("server", "s", "127.0.0.1", "Specify the server to connect to")
 	port    = pflag.StringP("port", "p", "9999", "Specify the port number to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
-
-	localAddrs []addr
 )
 
 type (
@@ -182,6 +180,7 @@ func capture(serverfd int) {
 		os.Exit(5)
 	}
 
+	localAddrs := map[addr]bool{}
 	for {
 		data, ci, err := handle.ReadPacketData()
 		if err != nil {
@@ -191,11 +190,11 @@ func capture(serverfd int) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		packet_handler(serverfd, ci.CaptureLength, data)
+		packet_handler(serverfd, ci.CaptureLength, data, localAddrs)
 	}
 }
 
-func packet_handler(serverfd int, len int, packet []byte) {
+func packet_handler(serverfd int, len int, packet []byte, localAddrs map[addr]bool) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
@@ -225,25 +224,14 @@ func packet_handler(serverfd int, len int, packet []byte) {
 	// in the list of source addresses we've seen on our network.
 	// If it is, don't bother sending it over the bridge as the
 	// recipient is local.
-	srcaddrmatch := false
-	for _, localAddr := range localAddrs {
-		if localAddr == dstAddr(packet) {
-			// DebugLog("packet_handler returned, skipping local packet%s", "\n")
-			return
-		}
-		// Since we're going through the list anyway, see if
-		// the source address we've observed is already in the
-		// list, in case we want to add it.
-		if localAddr == srcAddr(packet) {
-			srcaddrmatch = true
-		}
+	if localAddrs[dstAddr(packet)] {
+		// DebugLog("packet_handler returned, skipping local packet%s", "\n")
+		return
 	}
 
 	// Destination is remote, but originated locally, so we can add
 	// the source address to our list.
-	if !srcaddrmatch {
-		localAddrs = append(localAddrs, srcAddr(packet))
-	}
+	localAddrs[srcAddr(packet)] = true
 
 	netlen := [4]byte{}
 	binary.BigEndian.PutUint32(netlen[:], uint32(len))
