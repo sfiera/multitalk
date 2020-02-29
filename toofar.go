@@ -81,12 +81,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	lcl, err := EtherTalk(*dev)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+
 	go func() {
 		defer close(ch)
-		capture(srv.Send)
+		for packet := range srv.Recv {
+			lcl.Send <- packet
+		}
 	}()
 	go func() {
-		transmit(srv.Recv)
+		for packet := range lcl.Recv {
+			srv.Send <- packet
+		}
 	}()
 	<-ch
 }
@@ -158,39 +168,52 @@ func TCPServer(server string) (*Interface, error) {
 	}, nil
 }
 
-func capture(send chan<- []byte) {
-	// DebugLog("Using device: %s\n", dev)
-	handle, err := pcap.OpenLive(*dev, 4096, true, pcap.BlockForever)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open dev %s: %s\n", *dev, err.Error())
-		os.Exit(3)
-	}
+func EtherTalk(dev string) (*Interface, error) {
+	recvCh := capture(dev)
+	sendCh := transmit(dev)
+	return &Interface{
+		Send: sendCh,
+		Recv: recvCh,
+	}, nil
+}
 
-	filter := "atalk or aarp"
-	fp, err := handle.CompileBPFFilter(filter)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "compile filter %s: %s\n", filter, err.Error())
-		os.Exit(4)
-	}
-
-	err = handle.SetBPFInstructionFilter(fp)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "install filter %s: %s\n", filter, err.Error())
-		os.Exit(5)
-	}
-
-	localAddrs := map[addr]bool{}
-	for {
-		data, ci, err := handle.ReadPacketData()
+func capture(dev string) <-chan []byte {
+	ch := make(chan []byte)
+	go func(send chan<- []byte) {
+		// DebugLog("Using device: %s\n", dev)
+		handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "read packet %s: %s\n", *dev, err.Error())
+			fmt.Fprintf(os.Stderr, "open dev %s: %s\n", dev, err.Error())
+			os.Exit(3)
+		}
+
+		filter := "atalk or aarp"
+		fp, err := handle.CompileBPFFilter(filter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "compile filter %s: %s\n", filter, err.Error())
+			os.Exit(4)
+		}
+
+		err = handle.SetBPFInstructionFilter(fp)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "install filter %s: %s\n", filter, err.Error())
 			os.Exit(5)
 		}
-		if ci.CaptureLength != ci.Length {
-			// DebugLog("truncated packet! %s\n", "");
+
+		localAddrs := map[addr]bool{}
+		for {
+			data, ci, err := handle.ReadPacketData()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read packet %s: %s\n", dev, err.Error())
+				os.Exit(5)
+			}
+			if ci.CaptureLength != ci.Length {
+				// DebugLog("truncated packet! %s\n", "");
+			}
+			packet_handler(send, data, localAddrs)
 		}
-		packet_handler(send, data, localAddrs)
-	}
+	}(ch)
+	return ch
 }
 
 func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool) {
@@ -234,30 +257,34 @@ func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool)
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(recv <-chan []byte) {
-	//char errbuf[PCAP_ERRBUF_SIZE];
+func transmit(dev string) chan<- []byte {
+	ch := make(chan []byte)
+	go func(recv <-chan []byte) {
+		//char errbuf[PCAP_ERRBUF_SIZE];
 
-	// DebugLog("Using device: %s\n", dev);
-	handle, err := pcap.OpenLive(*dev, 1, false, 1000)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open dev %s: %s\n", *dev, err.Error())
-		os.Exit(3)
-	}
-
-	for packet := range recv {
-		// printBuffer(packet)
-		// We now have a frame, time to send it out.
-		localPacketMu.Lock()
-		localPackets = append(localPackets, packet)
-		localPacketMu.Unlock()
-
-		err = handle.WritePacketData(packet)
-		// DebugLog("pcap_sendpacket returned %d\n", pret);
+		// DebugLog("Using device: %s\n", dev);
+		handle, err := pcap.OpenLive(dev, 1, false, 1000)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
+			fmt.Fprintf(os.Stderr, "open dev %s: %s\n", dev, err.Error())
+			os.Exit(3)
 		}
-		// The capture thread will free these
-	}
+
+		for packet := range recv {
+			// printBuffer(packet)
+			// We now have a frame, time to send it out.
+			localPacketMu.Lock()
+			localPackets = append(localPackets, packet)
+			localPacketMu.Unlock()
+
+			err = handle.WritePacketData(packet)
+			// DebugLog("pcap_sendpacket returned %d\n", pret);
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
+			}
+			// The capture thread will free these
+		}
+	}(ch)
+	return ch
 }
 
 func srcAddr(packet []byte) (a addr) {
