@@ -86,10 +86,8 @@ package main
 // #endif
 // }
 //
-// void packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-//     struct capture_context *cctx = (struct capture_context*)args;
+// void packet_handler(struct capture_context *cctx, size_t len, const uint8_t *packet) {
 //     int serverfd = cctx->fd;
-//     uint32_t len = htonl(header->caplen);
 //
 //     DebugLog("packet_handler entered%s", "\n");
 //
@@ -98,8 +96,8 @@ package main
 //     pthread_mutex_lock(&qumu);
 //     struct packet *np;
 //     for (np = head.tqh_first; np != NULL; np = np->entries.tqe_next) {
-//         if( np->len == header->caplen ) {
-//             if( memcmp(packet, np->buffer, header->caplen) == 0 ) {
+//         if( np->len == len ) {
+//             if( memcmp(packet, np->buffer, len) == 0 ) {
 //                 free(np->buffer);
 //                 TAILQ_REMOVE(&head, np, entries);
 //                 free(np);
@@ -112,7 +110,7 @@ package main
 //     pthread_mutex_unlock(&qumu);
 //
 //     // anything less than this isn't a valid frame
-//     if( header->caplen < 18 ) {
+//     if( len < 18 ) {
 //         DebugLog("packet_handler returned, skipping invalid packet%s", "\n");
 //         return;
 //     }
@@ -144,43 +142,15 @@ package main
 //         TAILQ_INSERT_TAIL(&cctx->addrhead, newaddr, entries);
 //     }
 //
-//     if( header->caplen != header->len ) {
-//         DebugLog("truncated packet! %s\n", "");
-//     }
-//     write(serverfd, &len, sizeof(len));
-//     write(serverfd, packet, header->caplen);
-//     DebugLog("Wrote packet of size %d\n", header->caplen);
-//     return;
+//     uint32_t netlen = htonl(len);
+//     write(serverfd, &netlen, sizeof(netlen));
+//     write(serverfd, packet, len);
+//     DebugLog("Wrote packet of size %d\n", len);
 // }
 //
-// void capture(char *dev, int serverfd) {
-//     char errbuf[PCAP_ERRBUF_SIZE];
-//     struct capture_context cctx;
-//
-//     cctx.fd = serverfd;
-//     TAILQ_INIT(&cctx.addrhead);
-//
-//     DebugLog("Using device: %s\n", dev);
-//     pcap_t *handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
-//     if( !handle ) {
-//         fprintf(stderr, "Couldn't open pcap for device %s: %s\n", dev, errbuf);
-//         exit(3);
-//     }
-//
-//     char filter[] = "atalk or aarp";
-//     struct bpf_program fp;
-//     bpf_u_int32 net;
-//     if( pcap_compile(handle, &fp, filter, 0, net) == -1 ) {
-//         fprintf(stderr, "Couldn't parse filter %s: %s\n", filter, pcap_geterr(handle));
-//         exit(4);
-//     }
-//
-//     if( pcap_setfilter(handle, &fp) == -1 ) {
-//         fprintf(stderr, "Couldn't install filter %s: %s\n", filter, pcap_geterr(handle));
-//         exit(5);
-//     }
-//
-//     pcap_loop(handle, -1, packet_handler, (u_char*)&cctx);
+// void init_cctx(struct capture_context *cctx, int fd) {
+//     cctx->fd = fd;
+//     TAILQ_INIT(&cctx->addrhead);
 // }
 //
 // void transmit(char *dev, int serverfd) {
@@ -307,6 +277,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/gopacket/pcap"
 	"github.com/spf13/pflag"
 )
 
@@ -332,15 +303,15 @@ func main() {
 	socket := initialize()
 	go func() {
 		defer close(ch)
-		C.capture(C.CString(*dev), socket)
+		capture(socket)
 	}()
 	go func() {
-		C.transmit(C.CString(*dev), socket)
+		C.transmit(C.CString(*dev), C.int(socket))
 	}()
 	<-ch
 }
 
-func initialize() (socket C.int) {
+func initialize() (socket int) {
 	hints := C.struct_addrinfo{
 		ai_family:   C.PF_INET,
 		ai_socktype: C.SOCK_STREAM,
@@ -366,5 +337,43 @@ func initialize() (socket C.int) {
 
 	C.pthread_mutex_init(&C.qumu, nil)
 	C.head_tailq_init()
-	return serverfd
+	return int(serverfd)
+}
+
+func capture(serverfd int) {
+	cctx := C.struct_capture_context{}
+
+	C.init_cctx(&cctx, C.int(serverfd))
+
+	// DebugLog("Using device: %s\n", dev)
+	handle, err := pcap.OpenLive(*dev, 4096, true, pcap.BlockForever)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open dev %s: %s\n", *dev, err.Error())
+		os.Exit(3)
+	}
+
+	filter := "atalk or aarp"
+	fp, err := handle.CompileBPFFilter(filter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compile filter %s: %s\n", filter, err.Error())
+		os.Exit(4)
+	}
+
+	err = handle.SetBPFInstructionFilter(fp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "install filter %s: %s\n", filter, err.Error())
+		os.Exit(5)
+	}
+
+	for {
+		data, ci, err := handle.ReadPacketData()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read packet %s: %s\n", *dev, err.Error())
+			os.Exit(5)
+		}
+		if ci.CaptureLength != ci.Length {
+			// DebugLog("truncated packet! %s\n", "");
+		}
+		C.packet_handler(&cctx, C.size_t(ci.CaptureLength), (*C.uint8_t)(&data[0]))
+	}
 }
