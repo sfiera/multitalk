@@ -304,47 +304,8 @@ package main
 //     }
 // }
 //
-// char *dev = NULL;
-// char *server = "127.0.0.1";
-// char *port = "9999";
-//
-// void init(struct thrctx* ctx) {
-//     char errbuf[PCAP_ERRBUF_SIZE];
-//     if( dev == NULL ) {
-//         dev = pcap_lookupdev(errbuf);
-//         if( dev == NULL ) {
-//             fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-//             exit(2);
-//         }
-//     }
-//
-//     struct addrinfo hints, *res = NULL;
-//     memset(&hints, 0, sizeof(hints));
-//     hints.ai_family = PF_INET;
-//     hints.ai_socktype = SOCK_STREAM;
-//     hints.ai_protocol = IPPROTO_TCP;
-//
-//     if( getaddrinfo(server, port, &hints, &res) != 0 ) {
-//         fprintf(stderr, "Unknown hostname: %s\n", server);
-//         exit(5);
-//     }
-//
-//     int serverfd = socket(PF_INET, SOCK_STREAM, 0);
-//     if( serverfd < 0 ) {
-//         fprintf(stderr, "socket call failed\n");
-//         exit(6);
-//     };
-//
-//     if( connect(serverfd, res->ai_addr, (socklen_t)(sizeof(struct sockaddr_in))) ) {
-//         fprintf(stderr, "connect failed\n");
-//         exit(7);
-//     }
-//
-//     pthread_mutex_init(&qumu, NULL);
+// void head_tailq_init() {
 //     TAILQ_INIT(&head);
-//
-//     ctx->devname = dev;
-//     ctx->socket = serverfd;
 // }
 import "C"
 import (
@@ -372,13 +333,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	C.dev = C.CString(*dev)
-	C.server = C.CString(*server)
-	C.port = C.CString(*port)
-
 	ch := make(chan bool)
 	ctx := C.struct_thrctx{}
-	C.init(&ctx)
+	initialize(&ctx)
 	go func() {
 		defer close(ch)
 		C.capture(ctx.devname, ctx.socket)
@@ -387,4 +344,35 @@ func main() {
 		C.transmit(ctx.devname, ctx.socket)
 	}()
 	<-ch
+}
+
+func initialize(ctx *C.struct_thrctx) {
+	hints := C.struct_addrinfo{
+		ai_family:   C.PF_INET,
+		ai_socktype: C.SOCK_STREAM,
+		ai_protocol: C.IPPROTO_TCP,
+	}
+	res := (*C.struct_addrinfo)(nil)
+
+	if C.getaddrinfo(C.CString(*server), C.CString(*port), &hints, &res) != 0 {
+		fmt.Fprintf(os.Stderr, "Unknown hostname: %s\n", server)
+		os.Exit(5)
+	}
+
+	serverfd := C.socket(C.PF_INET, C.SOCK_STREAM, 0)
+	if serverfd < 0 {
+		fmt.Fprintf(os.Stderr, "socket call failed\n")
+		os.Exit(6)
+	}
+
+	if C.connect(serverfd, res.ai_addr, (C.socklen_t)(C.sizeof_struct_sockaddr_in)) != 0 {
+		fmt.Fprintf(os.Stderr, "connect failed\n")
+		os.Exit(7)
+	}
+
+	C.pthread_mutex_init(&C.qumu, nil)
+	C.head_tailq_init()
+
+	ctx.devname = C.CString(*dev)
+	ctx.socket = serverfd
 }
