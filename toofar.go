@@ -50,21 +50,17 @@ package main
 // #endif
 //
 // pthread_mutex_t qumu;
-// TAILQ_HEAD(lastq, packet) head;
+// TAILQ_HEAD(lastq, packet) packethead;
 // struct packet {
 //     uint8_t *buffer;
 //     size_t len;
 //     TAILQ_ENTRY(packet) entries;
 // };
 //
+// TAILQ_HEAD(addrq, addrlist) addrhead;
 // struct addrlist {
 //     uint8_t srcaddr[6];
 //     TAILQ_ENTRY(addrlist) entries;
-// };
-//
-// struct capture_context {
-//     int fd;
-//     TAILQ_HEAD(addrq, addrlist) addrhead;
 // };
 //
 // struct etherhdr {
@@ -83,27 +79,23 @@ package main
 // #endif
 // }
 //
-// void init_cctx(struct capture_context *cctx, int fd) {
-//     cctx->fd = fd;
-//     TAILQ_INIT(&cctx->addrhead);
-// }
-//
 // void tailq_remove_packet(struct packet *np) {
-//     TAILQ_REMOVE(&head, np, entries);
+//     TAILQ_REMOVE(&packethead, np, entries);
 // }
 //
-// void tailq_insert_addr(struct capture_context *cctx, struct addrlist *newaddr) {
-//     TAILQ_INSERT_TAIL(&cctx->addrhead, newaddr, entries);
+// void tailq_insert_addr(struct addrlist *newaddr) {
+//     TAILQ_INSERT_TAIL(&addrhead, newaddr, entries);
 // }
 //
 // void tailq_insert_packet(struct packet *np) {
 //     pthread_mutex_lock(&qumu);
-//     TAILQ_INSERT_TAIL(&head, np, entries);
+//     TAILQ_INSERT_TAIL(&packethead, np, entries);
 //     pthread_mutex_unlock(&qumu);
 // }
 //
-// void head_tailq_init() {
-//     TAILQ_INIT(&head);
+// void tailq_init() {
+//     TAILQ_INIT(&addrhead);
+//     TAILQ_INIT(&packethead);
 // }
 //
 // uint16_t frame_type(const uint8_t *packet) {
@@ -176,15 +168,11 @@ func initialize() (socket int) {
 	}
 
 	C.pthread_mutex_init(&C.qumu, nil)
-	C.head_tailq_init()
+	C.tailq_init()
 	return int(serverfd)
 }
 
 func capture(serverfd int) {
-	cctx := C.struct_capture_context{}
-
-	C.init_cctx(&cctx, C.int(serverfd))
-
 	// DebugLog("Using device: %s\n", dev)
 	handle, err := pcap.OpenLive(*dev, 4096, true, pcap.BlockForever)
 	if err != nil {
@@ -214,19 +202,17 @@ func capture(serverfd int) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		packet_handler(&cctx, ci.CaptureLength, data)
+		packet_handler(serverfd, ci.CaptureLength, data)
 	}
 }
 
-func packet_handler(cctx *C.struct_capture_context, len int, packet []byte) {
-	serverfd := cctx.fd
-
+func packet_handler(serverfd int, len int, packet []byte) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
 	C.pthread_mutex_lock(&C.qumu)
-	for np := C.head.tqh_first; np != nil; np = np.entries.tqe_next {
+	for np := C.packethead.tqh_first; np != nil; np = np.entries.tqe_next {
 		if int(np.len) == len {
 			if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(np.buffer), C.size_t(len)) == 0 {
 				C.free(unsafe.Pointer(np.buffer))
@@ -251,7 +237,7 @@ func packet_handler(cctx *C.struct_capture_context, len int, packet []byte) {
 	// If it is, don't bother sending it over the bridge as the
 	// recipient is local.
 	srcaddrmatch := (*C.struct_addrlist)(nil)
-	for ap := cctx.addrhead.tqh_first; ap != nil; ap = ap.entries.tqe_next {
+	for ap := C.addrhead.tqh_first; ap != nil; ap = ap.entries.tqe_next {
 		if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(&ap.srcaddr[0]), 6) == 0 {
 			// DebugLog("packet_handler returned, skipping local packet%s", "\n")
 			return
@@ -269,13 +255,13 @@ func packet_handler(cctx *C.struct_capture_context, len int, packet []byte) {
 	if srcaddrmatch == nil {
 		newaddr := (*C.struct_addrlist)(C.calloc(1, C.sizeof_struct_addrlist))
 		C.memcpy(unsafe.Pointer(&newaddr.srcaddr[0]), unsafe.Pointer(&packet[6]), 6)
-		C.tailq_insert_addr(cctx, newaddr)
+		C.tailq_insert_addr(newaddr)
 	}
 
 	netlen := [4]byte{}
 	binary.BigEndian.PutUint32(netlen[:], uint32(len))
-	C.write(serverfd, unsafe.Pointer(&netlen[0]), 4)
-	C.write(serverfd, unsafe.Pointer(&packet[0]), C.size_t(len))
+	C.write(C.int(serverfd), unsafe.Pointer(&netlen[0]), 4)
+	C.write(C.int(serverfd), unsafe.Pointer(&packet[0]), C.size_t(len))
 	// DebugLog("Wrote packet of size %d\n", len)
 }
 
