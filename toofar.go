@@ -352,34 +352,11 @@ package main
 //     ctx->devname = dev;
 //     ctx->socket = serverfd;
 // }
-//
-// void run() {
-//     struct thrctx ctx;
-//     init(&ctx);
-//
-//     pthread_attr_t defaultattrs;
-//     pthread_attr_init(&defaultattrs);
-//     //pthread_attr_setdetachstate(&defaultattrs, PTHREAD_CREATE_DETACHED);
-//
-//     pthread_t capture_thread;
-//     if( pthread_create(&capture_thread, &defaultattrs, capture, &ctx) != 0 ) {
-//         fprintf(stderr, "Couldn't create capture thread\n");
-//         exit(3);
-//     }
-//
-//     pthread_t transmit_thread;
-//     if( pthread_create(&transmit_thread, &defaultattrs, transmit, &ctx) != 0 ) {
-//         fprintf(stderr, "Couldn't create transmit thread\n");
-//         exit(4);
-//     }
-//
-//     void *valueptr = NULL;
-//     pthread_join(capture_thread, &valueptr);
-// }
 import "C"
 import (
 	"fmt"
 	"os"
+	"unsafe"
 
 	"github.com/spf13/pflag"
 )
@@ -406,5 +383,14 @@ func main() {
 	C.server = C.CString(*server)
 	C.port = C.CString(*port)
 
-	C.run()
+	ch := make(chan interface{})
+	ctx := C.struct_thrctx{}
+	C.init(&ctx)
+	go func() {
+		ch <- C.capture(unsafe.Pointer(&ctx))
+	}()
+	go func() {
+		C.transmit(unsafe.Pointer(&ctx))
+	}()
+	<-ch
 }
