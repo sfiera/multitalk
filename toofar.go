@@ -158,9 +158,7 @@ package main
 //     return;
 // }
 //
-// void *capture(void *ctx) {
-//     char *dev = ((struct thrctx *)ctx)->devname;
-//     int serverfd = ((struct thrctx *)ctx)->socket;
+// void capture(char *dev, int serverfd) {
 //     char errbuf[PCAP_ERRBUF_SIZE];
 //     struct capture_context cctx;
 //
@@ -188,12 +186,9 @@ package main
 //     }
 //
 //     pcap_loop(handle, -1, packet_handler, (u_char*)&cctx);
-//     return NULL;
 // }
 //
-// void *transmit(void *ctx) {
-//     char *dev = ((struct thrctx *)ctx)->devname;
-//     int serverfd = ((struct thrctx *)ctx)->socket;
+// void transmit(char *dev, int serverfd) {
 //     char errbuf[PCAP_ERRBUF_SIZE];
 //
 //     DebugLog("Using device: %s\n", dev);
@@ -307,7 +302,6 @@ package main
 //         if( buffer ) free(buffer);
 //
 //     }
-//     return 0;
 // }
 //
 // char *dev = NULL;
@@ -356,7 +350,6 @@ import "C"
 import (
 	"fmt"
 	"os"
-	"unsafe"
 
 	"github.com/spf13/pflag"
 )
@@ -383,14 +376,15 @@ func main() {
 	C.server = C.CString(*server)
 	C.port = C.CString(*port)
 
-	ch := make(chan interface{})
+	ch := make(chan bool)
 	ctx := C.struct_thrctx{}
 	C.init(&ctx)
 	go func() {
-		ch <- C.capture(unsafe.Pointer(&ctx))
+		defer close(ch)
+		C.capture(ctx.devname, ctx.socket)
 	}()
 	go func() {
-		C.transmit(unsafe.Pointer(&ctx))
+		C.transmit(ctx.devname, ctx.socket)
 	}()
 	<-ch
 }
