@@ -57,18 +57,6 @@ package main
 //     TAILQ_ENTRY(packet) entries;
 // };
 //
-// TAILQ_HEAD(addrq, addrlist) addrhead;
-// struct addrlist {
-//     uint8_t srcaddr[6];
-//     TAILQ_ENTRY(addrlist) entries;
-// };
-//
-// struct etherhdr {
-//     uint8_t dst[6];
-//     uint8_t src[6];
-//     uint16_t type;
-// };
-//
 // void print_buffer(uint8_t *buffer, size_t len) {
 // #ifdef DEBUG
 //     size_t i;
@@ -83,10 +71,6 @@ package main
 //     TAILQ_REMOVE(&packethead, np, entries);
 // }
 //
-// void tailq_insert_addr(struct addrlist *newaddr) {
-//     TAILQ_INSERT_TAIL(&addrhead, newaddr, entries);
-// }
-//
 // void tailq_insert_packet(struct packet *np) {
 //     pthread_mutex_lock(&qumu);
 //     TAILQ_INSERT_TAIL(&packethead, np, entries);
@@ -94,7 +78,6 @@ package main
 // }
 //
 // void tailq_init() {
-//     TAILQ_INIT(&addrhead);
 //     TAILQ_INIT(&packethead);
 // }
 //
@@ -118,6 +101,12 @@ var (
 	server  = pflag.StringP("server", "s", "127.0.0.1", "Specify the server to connect to")
 	port    = pflag.StringP("port", "p", "9999", "Specify the port number to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
+
+	localAddrs []addr
+)
+
+type (
+	addr [6]byte
 )
 
 func main() {
@@ -236,26 +225,24 @@ func packet_handler(serverfd int, len int, packet []byte) {
 	// in the list of source addresses we've seen on our network.
 	// If it is, don't bother sending it over the bridge as the
 	// recipient is local.
-	srcaddrmatch := (*C.struct_addrlist)(nil)
-	for ap := C.addrhead.tqh_first; ap != nil; ap = ap.entries.tqe_next {
-		if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(&ap.srcaddr[0]), 6) == 0 {
+	srcaddrmatch := false
+	for _, localAddr := range localAddrs {
+		if localAddr == dstAddr(packet) {
 			// DebugLog("packet_handler returned, skipping local packet%s", "\n")
 			return
 		}
 		// Since we're going through the list anyway, see if
 		// the source address we've observed is already in the
 		// list, in case we want to add it.
-		if C.memcmp(unsafe.Pointer(&packet[6]), unsafe.Pointer(&ap.srcaddr[0]), 6) == 0 {
-			srcaddrmatch = ap
+		if localAddr == srcAddr(packet) {
+			srcaddrmatch = true
 		}
 	}
 
 	// Destination is remote, but originated locally, so we can add
 	// the source address to our list.
-	if srcaddrmatch == nil {
-		newaddr := (*C.struct_addrlist)(C.calloc(1, C.sizeof_struct_addrlist))
-		C.memcpy(unsafe.Pointer(&newaddr.srcaddr[0]), unsafe.Pointer(&packet[6]), 6)
-		C.tailq_insert_addr(newaddr)
+	if !srcaddrmatch {
+		localAddrs = append(localAddrs, srcAddr(packet))
 	}
 
 	netlen := [4]byte{}
@@ -362,4 +349,14 @@ func transmit(serverfd int) {
 		}
 		// The capture thread will free these
 	}
+}
+
+func srcAddr(packet []byte) (a addr) {
+	copy(a[:], packet[6:12])
+	return
+}
+
+func dstAddr(packet []byte) (a addr) {
+	copy(a[:], packet[0:6])
+	return
 }
