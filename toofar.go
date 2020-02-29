@@ -99,130 +99,25 @@ package main
 //     TAILQ_INSERT_TAIL(&cctx->addrhead, newaddr, entries);
 // }
 //
-// void transmit(char *dev, int serverfd) {
-//     char errbuf[PCAP_ERRBUF_SIZE];
-//
-//     DebugLog("Using device: %s\n", dev);
-//     pcap_t *handle = pcap_open_live(dev, 1, 0, 1000, errbuf);
-//     if( !handle ) {
-//         fprintf(stderr, "Couldn't open pcap for device %s: %s\n", dev, errbuf);
-//         exit(3);
-//     }
-//
-//     fd_set master_readset;
-//     int nactive = serverfd+1;
-//
-//     FD_ZERO(&master_readset);
-//     FD_SET(serverfd, &master_readset);
-//     while(1) {
-//         int selret;
-//         fd_set readset = master_readset;
-//
-//         errno = 0;
-//         selret = select(nactive, &readset, NULL, NULL, NULL);
-//         DebugLog("select woke up: %d\n", selret);
-//         if( selret == -1 ) {
-//             if( errno == EINTR )
-//                 continue;
-//             fprintf(stderr, "problem with select\n");
-//             break;
-//         }
-//         if( selret == 0 )
-//             continue;
-//
-//         // receive a frame and send it out on the net
-//         uint32_t len = 0;
-//         uint32_t tmplen = 0;
-//         uint8_t *buffer = (uint8_t *)&tmplen;
-//         size_t numread = 0;
-//         ssize_t r;
-//
-//         do {
-//             r = read(serverfd, buffer + numread, 4 - numread);
-//             if( (r == -1) && (errno == EINTR) )
-//                 continue;
-//             if( r <= 0 ) {
-//                 perror("read");
-//                 exit(1);
-//                 buffer = NULL;
-//                 goto playitagain;
-//             }
-//             numread += r;
-//         } while( numread < 4 );
-//
-//         len = ntohl(tmplen);
-//         if( len > 4096 ) {
-//             fprintf(stderr, "Received length is invalid: %" PRIu32 " vs %" PRIu32 "\n", len, tmplen);
-//             continue;
-//         }
-//         DebugLog("receiving packet of length: %u\n", len);
-//
-//         buffer = calloc(1, len);
-//         if( !buffer )
-//             exit(99);
-//
-//         numread = 0;
-//         do {
-//             r = read(serverfd, buffer + numread, len - numread);
-//             if( (r == -1) && (errno == EINTR) )
-//                 continue;
-//             if( r <= 0 ) {
-//                 perror("read");
-//                 exit(1);
-//                 goto playitagain;
-//             }
-//             numread += r;
-//         } while( numread < len );
-//         DebugLog("Successfully received packet\n%s", "");
-//
-//         print_buffer(buffer, len);
-//
-//         /* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
-//         if( len < 26 ) {
-//             // Too short to be a valid ethernet frame
-//             goto playitagain;
-//         }
-//
-//         // Verify this is actuall an AppleTalk related frame we've
-//         // received, in a vague attempt at not polluting the network
-//         // with unintended frames.
-//         uint16_t type = htons(*(uint16_t*)(buffer+20));
-//         DebugLog("Packet frame type: %x\n", type);
-//         if( ! ((type == 0x809b) || (type == 0x80f3)) ) {
-//             // Not an appletalk or aarp frame, drop it.
-//             DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", type);
-//             goto playitagain;
-//         }
-//
-//         // We now have a frame, time to send it out.
-//         struct packet *lastsent = calloc(1,sizeof(struct packet));
-//         lastsent->buffer = buffer;
-//         lastsent->len = len;
-//
-//         pthread_mutex_lock(&qumu);
-//         TAILQ_INSERT_TAIL(&head, lastsent, entries);
-//         pthread_mutex_unlock(&qumu);
-//         int pret = pcap_sendpacket(handle, buffer, len);
-//         DebugLog("pcap_sendpacket returned %d\n", pret);
-//         if( pret != 0 ) {
-//             fprintf(stderr, "Error sending packet out onto local net\n");
-//         }
-//         // The capture thread will free these
-//         buffer = NULL;
-// playitagain:
-//         if( buffer ) free(buffer);
-//
-//     }
+// void tailq_insert_packet(struct packet *np) {
+//     pthread_mutex_lock(&qumu);
+//     TAILQ_INSERT_TAIL(&head, np, entries);
+//     pthread_mutex_unlock(&qumu);
 // }
 //
 // void head_tailq_init() {
 //     TAILQ_INIT(&head);
+// }
+//
+// uint16_t frame_type(const uint8_t *packet) {
+//     return htons(*(uint16_t*)(packet + 20));
 // }
 import "C"
 import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"syscall"
 	"unsafe"
 
 	"github.com/google/gopacket/pcap"
@@ -254,7 +149,7 @@ func main() {
 		capture(socket)
 	}()
 	go func() {
-		C.transmit(C.CString(*dev), C.int(socket))
+		transmit(socket)
 	}()
 	<-ch
 }
@@ -385,4 +280,103 @@ func packet_handler(cctx *C.struct_capture_context, len int, packet []byte) {
 	C.write(serverfd, unsafe.Pointer(&netlen[0]), 4)
 	C.write(serverfd, unsafe.Pointer(&packet[0]), C.size_t(len))
 	// DebugLog("Wrote packet of size %d\n", len)
+}
+
+func transmit(serverfd int) {
+	//char errbuf[PCAP_ERRBUF_SIZE];
+
+	// DebugLog("Using device: %s\n", dev);
+	handle, err := pcap.OpenLive(*dev, 1, false, 1000)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open dev %s: %s\n", *dev, err.Error())
+		os.Exit(3)
+	}
+
+	for {
+		// receive a frame and send it out on the net
+		len := uint32(0)
+		numread := uint32(0)
+		lenBuf := [4]byte{}
+
+		for loop := true; loop; loop = numread < 4 {
+			r, err := C.read(C.int(serverfd), unsafe.Pointer(&lenBuf[numread]), C.size_t(4-numread))
+			if (r == -1) && (err == syscall.EINTR) {
+				continue
+			}
+			if r <= 0 {
+				C.perror(C.CString("read"))
+				os.Exit(1)
+				continue
+			}
+			numread += uint32(r)
+		}
+
+		len = binary.BigEndian.Uint32(lenBuf[:])
+		if len > 4096 {
+			fmt.Fprintf(os.Stderr, "Received length is invalid: %u vs %u\n", len)
+			continue
+		}
+		// DebugLog("receiving packet of length: %u\n", len);
+
+		packetBuf := (*C.uint8_t)(C.calloc(1, C.size_t(len)))
+		if packetBuf == nil {
+			os.Exit(99)
+		}
+
+		numread = 0
+		for loop := true; loop; loop = numread < len {
+			r, err := C.read(C.int(serverfd), unsafe.Pointer(packetBuf), C.size_t(len-numread))
+			if (r == -1) && (err == syscall.EINTR) {
+				continue
+			}
+			if r <= 0 {
+				C.perror(C.CString("read"))
+				os.Exit(1)
+				if packetBuf != nil {
+					C.free(unsafe.Pointer(packetBuf))
+				}
+				continue
+			}
+			numread += uint32(r)
+		}
+		// DebugLog("Successfully received packet\n%s", "");
+
+		C.print_buffer(packetBuf, C.size_t(len))
+
+		/* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
+		if len < 26 {
+			// Too short to be a valid ethernet frame
+			if packetBuf != nil {
+				C.free(unsafe.Pointer(packetBuf))
+			}
+			continue
+		}
+
+		// Verify this is actuall an AppleTalk related frame we've
+		// received, in a vague attempt at not polluting the network
+		// with unintended frames.
+		frameType := C.frame_type(packetBuf)
+		// DebugLog("Packet frame type: %x\n", type);
+		if !((frameType == 0x809b) || (frameType == 0x80f3)) {
+			// Not an appletalk or aarp frame, drop it.
+			// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", frameType);
+			if packetBuf != nil {
+				C.free(unsafe.Pointer(packetBuf))
+			}
+			continue
+		}
+
+		// We now have a frame, time to send it out.
+		lastsent := (*C.struct_packet)(C.calloc(1, C.sizeof_struct_packet))
+		lastsent.buffer = packetBuf
+		lastsent.len = C.size_t(len)
+		C.tailq_insert_packet(lastsent)
+
+		err := handle.WritePacketData(C.GoBytes(unsafe.Pointer(packetBuf), C.int(len)))
+		// DebugLog("pcap_sendpacket returned %d\n", pret);
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
+		}
+		// The capture thread will free these
+	}
 }
