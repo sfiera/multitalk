@@ -9,8 +9,8 @@ all: $(EXES)
 clean:
 	rm -f $(OBJS) $(EXES)
 
-toofar: toofar.o
-	$(CC) $(LDFLAGS) -o $@ $^ -lpcap -lpthread
+toofar: toofar.go
+	go build -o $@ $^
 
 kwai: kwai.o
 	$(CC) $(LDFLAGS) -o $@ $^
