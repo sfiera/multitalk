@@ -28,38 +28,20 @@
 //
 package main
 
-// #include <stdlib.h>
-// #include <stdio.h>
-// #include <sys/types.h>
-// #include <pthread.h>
-// #include <sys/socket.h>
-// #include <inttypes.h>
-// #include <stdint.h>
-// #include <netdb.h>
-// #include <string.h>
-// #include <errno.h>
-// #include <unistd.h>
-// #include <sys/queue.h>
-//
-// #define VERSION "abridge 0.1"
-//
-// #ifdef DEBUG
-// #define DebugLog(format, ...) printf(format, __VA_ARGS__)
-// #else
-// #define DebugLog(...)
-// #endif
-//
-// pthread_mutex_t qumu;
-import "C"
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/google/gopacket/pcap"
 	"github.com/spf13/pflag"
+)
+
+const (
+	versionString = "abridge 0.1"
 )
 
 var (
@@ -67,7 +49,8 @@ var (
 	server  = pflag.StringP("server", "s", "127.0.0.1:9999", "Specify the server to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 
-	localPackets [][]byte
+	localPacketMu sync.Mutex
+	localPackets  [][]byte
 )
 
 type (
@@ -78,7 +61,7 @@ func main() {
 	pflag.Parse()
 
 	if *version {
-		fmt.Println(C.VERSION)
+		fmt.Println(versionString)
 		os.Exit(0)
 	} else if *dev == "" {
 		fmt.Fprintf(os.Stderr, "%s: missing required flag --interface\n", os.Args[0])
@@ -103,7 +86,6 @@ func initialize() net.Conn {
 		fmt.Fprintf(os.Stderr, "dial %s: %s\n", *server, err.Error())
 		os.Exit(1)
 	}
-	C.pthread_mutex_init(&C.qumu, nil)
 	return conn
 }
 
@@ -147,18 +129,18 @@ func packet_handler(conn net.Conn, packet []byte, localAddrs map[addr]bool) {
 
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
-	C.pthread_mutex_lock(&C.qumu)
+	localPacketMu.Lock()
 	for i, np := range localPackets {
 		if bytes.Compare(np, packet) == 0 {
 			last := len(localPackets) - 1
 			localPackets[i] = localPackets[last]
 			localPackets = localPackets[:last]
-			C.pthread_mutex_unlock(&C.qumu)
+			localPacketMu.Unlock()
 			// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
 			return
 		}
 	}
-	C.pthread_mutex_unlock(&C.qumu)
+	localPacketMu.Unlock()
 
 	// anything less than this isn't a valid frame
 	if len(packet) < 18 {
@@ -238,9 +220,9 @@ func transmit(conn net.Conn) {
 		}
 
 		// We now have a frame, time to send it out.
-		C.pthread_mutex_lock(&C.qumu)
+		localPacketMu.Lock()
 		localPackets = append(localPackets, packet)
-		C.pthread_mutex_unlock(&C.qumu)
+		localPacketMu.Unlock()
 
 		err = handle.WritePacketData(packet)
 		// DebugLog("pcap_sendpacket returned %d\n", pret);
