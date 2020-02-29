@@ -28,11 +28,8 @@
 //
 package main
 
-// #cgo LDFLAGS: -lpcap
 // #include <stdlib.h>
 // #include <stdio.h>
-// #include <pcap.h>
-// #include <getopt.h>
 // #include <sys/types.h>
 // #include <pthread.h>
 // #include <sys/socket.h>
