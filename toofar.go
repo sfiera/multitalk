@@ -55,6 +55,11 @@ var (
 
 type (
 	addr [6]byte
+
+	Interface struct {
+		Send chan<- []byte
+		Recv <-chan []byte
+	}
 )
 
 func main() {
@@ -69,27 +74,91 @@ func main() {
 	}
 
 	ch := make(chan bool)
-	conn := initialize()
+
+	srv, err := TCPServer(*server)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+
 	go func() {
 		defer close(ch)
-		capture(conn)
+		capture(srv.Send)
 	}()
 	go func() {
-		transmit(conn)
+		transmit(srv.Recv)
 	}()
 	<-ch
 }
 
-func initialize() net.Conn {
-	conn, err := net.Dial("tcp", *server)
+func TCPServer(server string) (*Interface, error) {
+	conn, err := net.Dial("tcp", server)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dial %s: %s\n", *server, err.Error())
-		os.Exit(1)
+		return nil, fmt.Errorf("dial %s: %s", server, err.Error())
 	}
-	return conn
+
+	sendCh := make(chan []byte)
+	recvCh := make(chan []byte)
+
+	go func() {
+		for packet := range sendCh {
+			_ = binary.Write(conn, binary.BigEndian, len(packet))
+			_, _ = conn.Write(packet)
+		}
+	}()
+
+	go func() {
+		for {
+			// receive a frame and send it out on the net
+			length := uint32(0)
+			err := binary.Read(conn, binary.BigEndian, &length)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+				os.Exit(1)
+			}
+
+			if length > 4096 {
+				fmt.Fprintf(os.Stderr, "Received length is invalid: %d vs %d\n", length, length)
+				continue
+			}
+			// DebugLog("receiving packet of length: %u\n", length);
+
+			packet := make([]byte, length)
+			_, err = conn.Read(packet)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+				os.Exit(1)
+			}
+			// DebugLog("Successfully received packet\n%s", "");
+
+			/* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
+			if len(packet) < 26 {
+				// Too short to be a valid ethernet frame
+				continue
+			}
+
+			// Verify this is actuall an AppleTalk related frame we've
+			// received, in a vague attempt at not polluting the network
+			// with unintended frames.
+			frameType := frameType(packet)
+			// DebugLog("Packet frame type: %x\n", type);
+			if !((frameType == 0x809b) || (frameType == 0x80f3)) {
+				// Not an appletalk or aarp frame, drop it.
+				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", frameType);
+				continue
+			}
+
+			recvCh <- packet
+		}
+	}()
+
+	return &Interface{
+		Send: sendCh,
+		Recv: recvCh,
+	}, nil
 }
 
-func capture(conn net.Conn) {
+func capture(send chan<- []byte) {
 	// DebugLog("Using device: %s\n", dev)
 	handle, err := pcap.OpenLive(*dev, 4096, true, pcap.BlockForever)
 	if err != nil {
@@ -120,11 +189,11 @@ func capture(conn net.Conn) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		packet_handler(conn, data, localAddrs)
+		packet_handler(send, data, localAddrs)
 	}
 }
 
-func packet_handler(conn net.Conn, packet []byte, localAddrs map[addr]bool) {
+func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
@@ -161,12 +230,11 @@ func packet_handler(conn net.Conn, packet []byte, localAddrs map[addr]bool) {
 	// the source address to our list.
 	localAddrs[srcAddr(packet)] = true
 
-	_ = binary.Write(conn, binary.BigEndian, len(packet))
-	_, _ = conn.Write(packet)
+	send <- packet
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(conn net.Conn) {
+func transmit(recv <-chan []byte) {
 	//char errbuf[PCAP_ERRBUF_SIZE];
 
 	// DebugLog("Using device: %s\n", dev);
@@ -176,49 +244,8 @@ func transmit(conn net.Conn) {
 		os.Exit(3)
 	}
 
-	for {
-		// receive a frame and send it out on the net
-		length := uint32(0)
-
-		err := binary.Read(conn, binary.BigEndian, &length)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
-			os.Exit(1)
-		}
-
-		if length > 4096 {
-			fmt.Fprintf(os.Stderr, "Received length is invalid: %u vs %u\n", length)
-			continue
-		}
-		// DebugLog("receiving packet of length: %u\n", length);
-
-		packet := make([]byte, length)
-		_, err = conn.Read(packet)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
-			os.Exit(1)
-		}
-		// DebugLog("Successfully received packet\n%s", "");
-
+	for packet := range recv {
 		// printBuffer(packet)
-
-		/* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
-		if length < 26 {
-			// Too short to be a valid ethernet frame
-			continue
-		}
-
-		// Verify this is actuall an AppleTalk related frame we've
-		// received, in a vague attempt at not polluting the network
-		// with unintended frames.
-		frameType := frameType(packet)
-		// DebugLog("Packet frame type: %x\n", type);
-		if !((frameType == 0x809b) || (frameType == 0x80f3)) {
-			// Not an appletalk or aarp frame, drop it.
-			// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", frameType);
-			continue
-		}
-
 		// We now have a frame, time to send it out.
 		localPacketMu.Lock()
 		localPackets = append(localPackets, packet)
