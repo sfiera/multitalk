@@ -52,11 +52,6 @@ package main
 // #define DebugLog(...)
 // #endif
 //
-// struct thrctx {
-//     char *devname;
-//     int socket;
-// };
-//
 // pthread_mutex_t qumu;
 // TAILQ_HEAD(lastq, packet) head;
 // struct packet {
@@ -334,19 +329,18 @@ func main() {
 	}
 
 	ch := make(chan bool)
-	ctx := C.struct_thrctx{}
-	initialize(&ctx)
+	socket := initialize()
 	go func() {
 		defer close(ch)
-		C.capture(ctx.devname, ctx.socket)
+		C.capture(C.CString(*dev), socket)
 	}()
 	go func() {
-		C.transmit(ctx.devname, ctx.socket)
+		C.transmit(C.CString(*dev), socket)
 	}()
 	<-ch
 }
 
-func initialize(ctx *C.struct_thrctx) {
+func initialize() (socket C.int) {
 	hints := C.struct_addrinfo{
 		ai_family:   C.PF_INET,
 		ai_socktype: C.SOCK_STREAM,
@@ -372,7 +366,5 @@ func initialize(ctx *C.struct_thrctx) {
 
 	C.pthread_mutex_init(&C.qumu, nil)
 	C.head_tailq_init()
-
-	ctx.devname = C.CString(*dev)
-	ctx.socket = serverfd
+	return serverfd
 }
