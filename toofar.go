@@ -50,33 +50,13 @@ package main
 // #endif
 //
 // pthread_mutex_t qumu;
-// TAILQ_HEAD(lastq, packet) packethead;
-// struct packet {
-//     uint8_t *buffer;
-//     size_t len;
-//     TAILQ_ENTRY(packet) entries;
-// };
-//
-// void tailq_remove_packet(struct packet *np) {
-//     TAILQ_REMOVE(&packethead, np, entries);
-// }
-//
-// void tailq_insert_packet(struct packet *np) {
-//     pthread_mutex_lock(&qumu);
-//     TAILQ_INSERT_TAIL(&packethead, np, entries);
-//     pthread_mutex_unlock(&qumu);
-// }
-//
-// void tailq_init() {
-//     TAILQ_INIT(&packethead);
-// }
 import "C"
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
-	"unsafe"
 
 	"github.com/google/gopacket/pcap"
 	"github.com/spf13/pflag"
@@ -86,6 +66,8 @@ var (
 	dev     = pflag.StringP("interface", "i", "", "Specify the interface to bridge to")
 	server  = pflag.StringP("server", "s", "127.0.0.1:9999", "Specify the server to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
+
+	localPackets [][]byte
 )
 
 type (
@@ -122,7 +104,6 @@ func initialize() net.Conn {
 		os.Exit(1)
 	}
 	C.pthread_mutex_init(&C.qumu, nil)
-	C.tailq_init()
 	return conn
 }
 
@@ -157,32 +138,30 @@ func capture(conn net.Conn) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		packet_handler(conn, ci.CaptureLength, data, localAddrs)
+		packet_handler(conn, data, localAddrs)
 	}
 }
 
-func packet_handler(conn net.Conn, len int, packet []byte, localAddrs map[addr]bool) {
+func packet_handler(conn net.Conn, packet []byte, localAddrs map[addr]bool) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
 	C.pthread_mutex_lock(&C.qumu)
-	for np := C.packethead.tqh_first; np != nil; np = np.entries.tqe_next {
-		if int(np.len) == len {
-			if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(np.buffer), C.size_t(len)) == 0 {
-				C.free(unsafe.Pointer(np.buffer))
-				C.tailq_remove_packet(np)
-				C.free(unsafe.Pointer(np))
-				C.pthread_mutex_unlock(&C.qumu)
-				// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
-				return
-			}
+	for i, np := range localPackets {
+		if bytes.Compare(np, packet) == 0 {
+			last := len(localPackets) - 1
+			localPackets[i] = localPackets[last]
+			localPackets = localPackets[:last]
+			C.pthread_mutex_unlock(&C.qumu)
+			// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
+			return
 		}
 	}
 	C.pthread_mutex_unlock(&C.qumu)
 
 	// anything less than this isn't a valid frame
-	if len < 18 {
+	if len(packet) < 18 {
 		// DebugLog("packet_handler returned, skipping invalid packet%s", "\n")
 		return
 	}
@@ -200,9 +179,9 @@ func packet_handler(conn net.Conn, len int, packet []byte, localAddrs map[addr]b
 	// the source address to our list.
 	localAddrs[srcAddr(packet)] = true
 
-	_ = binary.Write(conn, binary.BigEndian, len)
+	_ = binary.Write(conn, binary.BigEndian, len(packet))
 	_, _ = conn.Write(packet)
-	// DebugLog("Wrote packet of size %d\n", len)
+	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
 func transmit(conn net.Conn) {
@@ -259,10 +238,9 @@ func transmit(conn net.Conn) {
 		}
 
 		// We now have a frame, time to send it out.
-		lastsent := (*C.struct_packet)(C.calloc(1, C.sizeof_struct_packet))
-		lastsent.buffer = (*C.uint8_t)(C.CBytes(packet))
-		lastsent.len = C.size_t(length)
-		C.tailq_insert_packet(lastsent)
+		C.pthread_mutex_lock(&C.qumu)
+		localPackets = append(localPackets, packet)
+		C.pthread_mutex_unlock(&C.qumu)
 
 		err = handle.WritePacketData(packet)
 		// DebugLog("pcap_sendpacket returned %d\n", pret);
