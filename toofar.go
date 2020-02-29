@@ -313,7 +313,7 @@ func transmit(serverfd int) {
 		// Verify this is actuall an AppleTalk related frame we've
 		// received, in a vague attempt at not polluting the network
 		// with unintended frames.
-		frameType := C.frame_type(packetBuf)
+		frameType := frameType(C.GoBytes(unsafe.Pointer(packetBuf), C.int(len)))
 		// DebugLog("Packet frame type: %x\n", type);
 		if !((frameType == 0x809b) || (frameType == 0x80f3)) {
 			// Not an appletalk or aarp frame, drop it.
@@ -347,4 +347,8 @@ func srcAddr(packet []byte) (a addr) {
 func dstAddr(packet []byte) (a addr) {
 	copy(a[:], packet[0:6])
 	return
+}
+
+func frameType(packet []byte) uint16 {
+	return binary.BigEndian.Uint16(packet[20:22])
 }
