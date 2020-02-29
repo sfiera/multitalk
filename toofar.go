@@ -45,8 +45,8 @@ const (
 )
 
 var (
-	dev     = pflag.StringArrayP("interface", "i", []string{}, "Specify the interface to bridge to")
-	server  = pflag.StringArrayP("server", "s", []string{}, "Specify the server to connect to")
+	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
+	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 
 	localPacketMu sync.Mutex
@@ -99,7 +99,7 @@ func main() {
 }
 
 func Interfaces() (ifaces []Interface, _ error) {
-	niface := len(*server) + len(*dev)
+	niface := len(*server) + len(*ether)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
 	} else if niface == 1 {
@@ -114,8 +114,8 @@ func Interfaces() (ifaces []Interface, _ error) {
 		ifaces = append(ifaces, *srv)
 	}
 
-	for _, d := range *dev {
-		lcl, err := EtherTalk(d)
+	for _, dev := range *ether {
+		lcl, err := EtherTalk(dev)
 		if err != nil {
 			return nil, err
 		}
