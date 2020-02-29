@@ -313,23 +313,8 @@ package main
 // char *dev = NULL;
 // char *server = "127.0.0.1";
 // char *port = "9999";
-// int dontfork = 0;
 //
 // void run() {
-//     pid_t pid;
-//
-//     // Daemonize
-//     if( !dontfork ) {
-//         pid = fork();
-//         if( pid == -1 ) {
-//             perror("fork");
-//             exit(1);
-//         }
-//         if( pid > 0 )
-//             exit(0);
-//         setsid();
-//     }
-//
 //     char errbuf[PCAP_ERRBUF_SIZE];
 //     if( dev == NULL ) {
 //         dev = pcap_lookupdev(errbuf);
@@ -415,7 +400,6 @@ func main() {
 	C.dev = C.CString(*dev)
 	C.server = C.CString(*server)
 	C.port = C.CString(*port)
-	C.dontfork = 1
 
 	C.run()
 }
