@@ -45,8 +45,8 @@ const (
 )
 
 var (
-	dev     = pflag.StringP("interface", "i", "", "Specify the interface to bridge to")
-	server  = pflag.StringP("server", "s", "127.0.0.1:9999", "Specify the server to connect to")
+	dev     = pflag.StringArrayP("interface", "i", []string{}, "Specify the interface to bridge to")
+	server  = pflag.StringArrayP("server", "s", []string{}, "Specify the server to connect to")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 
 	localPacketMu sync.Mutex
@@ -68,14 +68,15 @@ func main() {
 	if *version {
 		fmt.Println(versionString)
 		os.Exit(0)
-	} else if *dev == "" {
-		fmt.Fprintf(os.Stderr, "%s: missing required flag --interface\n", os.Args[0])
-		os.Exit(1)
 	}
 
 	ch := make(chan bool)
 
-	ifaces := Interfaces()
+	ifaces, err := Interfaces()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
 	for i, iface := range ifaces {
 		sends := []chan<- []byte{}
@@ -97,20 +98,29 @@ func main() {
 	<-ch
 }
 
-func Interfaces() (ifaces []Interface) {
-	srv, err := TCPServer(*server)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+func Interfaces() (ifaces []Interface, _ error) {
+	niface := len(*server) + len(*dev)
+	if niface == 0 {
+		return nil, fmt.Errorf("no interfaces specified")
+	} else if niface == 1 {
+		return nil, fmt.Errorf("only one interface specified")
 	}
-	ifaces = append(ifaces, *srv)
 
-	lcl, err := EtherTalk(*dev)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+	for _, s := range *server {
+		srv, err := TCPServer(s)
+		if err != nil {
+			return nil, err
+		}
+		ifaces = append(ifaces, *srv)
 	}
-	ifaces = append(ifaces, *lcl)
+
+	for _, d := range *dev {
+		lcl, err := EtherTalk(d)
+		if err != nil {
+			return nil, err
+		}
+		ifaces = append(ifaces, *lcl)
+	}
 
 	return
 }
