@@ -75,30 +75,44 @@ func main() {
 
 	ch := make(chan bool)
 
+	ifaces := Interfaces()
+
+	for i, iface := range ifaces {
+		sends := []chan<- []byte{}
+		for j, other := range ifaces {
+			if i != j {
+				sends = append(sends, other.Send)
+			}
+		}
+
+		go func(recv <-chan []byte) {
+			defer close(ch)
+			for packet := range recv {
+				for _, send := range sends {
+					send <- packet
+				}
+			}
+		}(iface.Recv)
+	}
+	<-ch
+}
+
+func Interfaces() (ifaces []Interface) {
 	srv, err := TCPServer(*server)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
+	ifaces = append(ifaces, *srv)
 
 	lcl, err := EtherTalk(*dev)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
+	ifaces = append(ifaces, *lcl)
 
-	go func() {
-		defer close(ch)
-		for packet := range srv.Recv {
-			lcl.Send <- packet
-		}
-	}()
-	go func() {
-		for packet := range lcl.Recv {
-			srv.Send <- packet
-		}
-	}()
-	<-ch
+	return
 }
 
 func TCPServer(server string) (*Interface, error) {
@@ -169,37 +183,43 @@ func TCPServer(server string) (*Interface, error) {
 }
 
 func EtherTalk(dev string) (*Interface, error) {
-	recvCh := capture(dev)
-	sendCh := transmit(dev)
+	recvCh, err := capture(dev)
+	if err != nil {
+		return nil, err
+	}
+
+	sendCh, err := transmit(dev)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Interface{
 		Send: sendCh,
 		Recv: recvCh,
 	}, nil
 }
 
-func capture(dev string) <-chan []byte {
+func capture(dev string) (<-chan []byte, error) {
 	ch := make(chan []byte)
+
+	// DebugLog("Using device: %s\n", dev)
+	handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
+	if err != nil {
+		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
+	}
+
+	filter := "atalk or aarp"
+	fp, err := handle.CompileBPFFilter(filter)
+	if err != nil {
+		return nil, fmt.Errorf("compile filter %s: %s", filter, err.Error())
+	}
+
+	err = handle.SetBPFInstructionFilter(fp)
+	if err != nil {
+		return nil, fmt.Errorf("install filter %s: %s", filter, err.Error())
+	}
+
 	go func(send chan<- []byte) {
-		// DebugLog("Using device: %s\n", dev)
-		handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "open dev %s: %s\n", dev, err.Error())
-			os.Exit(3)
-		}
-
-		filter := "atalk or aarp"
-		fp, err := handle.CompileBPFFilter(filter)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "compile filter %s: %s\n", filter, err.Error())
-			os.Exit(4)
-		}
-
-		err = handle.SetBPFInstructionFilter(fp)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "install filter %s: %s\n", filter, err.Error())
-			os.Exit(5)
-		}
-
 		localAddrs := map[addr]bool{}
 		for {
 			data, ci, err := handle.ReadPacketData()
@@ -213,7 +233,7 @@ func capture(dev string) <-chan []byte {
 			packet_handler(send, data, localAddrs)
 		}
 	}(ch)
-	return ch
+	return ch, nil
 }
 
 func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool) {
@@ -257,18 +277,16 @@ func packet_handler(send chan<- []byte, packet []byte, localAddrs map[addr]bool)
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(dev string) chan<- []byte {
+func transmit(dev string) (chan<- []byte, error) {
 	ch := make(chan []byte)
+
+	// DebugLog("Using device: %s\n", dev);
+	handle, err := pcap.OpenLive(dev, 1, false, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
+	}
+
 	go func(recv <-chan []byte) {
-		//char errbuf[PCAP_ERRBUF_SIZE];
-
-		// DebugLog("Using device: %s\n", dev);
-		handle, err := pcap.OpenLive(dev, 1, false, 1000)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "open dev %s: %s\n", dev, err.Error())
-			os.Exit(3)
-		}
-
 		for packet := range recv {
 			// printBuffer(packet)
 			// We now have a frame, time to send it out.
@@ -284,7 +302,7 @@ func transmit(dev string) chan<- []byte {
 			// The capture thread will free these
 		}
 	}(ch)
-	return ch
+	return ch, nil
 }
 
 func srcAddr(packet []byte) (a addr) {
