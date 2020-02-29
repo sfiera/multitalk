@@ -314,7 +314,7 @@ package main
 // char *server = "127.0.0.1";
 // char *port = "9999";
 //
-// void run() {
+// void init(struct thrctx* ctx) {
 //     char errbuf[PCAP_ERRBUF_SIZE];
 //     if( dev == NULL ) {
 //         dev = pcap_lookupdev(errbuf);
@@ -346,17 +346,22 @@ package main
 //         exit(7);
 //     }
 //
+//     pthread_mutex_init(&qumu, NULL);
+//     TAILQ_INIT(&head);
+//
+//     ctx->devname = dev;
+//     ctx->socket = serverfd;
+// }
+//
+// void run() {
+//     struct thrctx ctx;
+//     init(&ctx);
+//
 //     pthread_attr_t defaultattrs;
 //     pthread_attr_init(&defaultattrs);
 //     //pthread_attr_setdetachstate(&defaultattrs, PTHREAD_CREATE_DETACHED);
 //
-//     pthread_mutex_init(&qumu, NULL);
-//     TAILQ_INIT(&head);
-//
 //     pthread_t capture_thread;
-//     struct thrctx ctx;
-//     ctx.devname = dev;
-//     ctx.socket = serverfd;
 //     if( pthread_create(&capture_thread, &defaultattrs, capture, &ctx) != 0 ) {
 //         fprintf(stderr, "Couldn't create capture thread\n");
 //         exit(3);
