@@ -86,71 +86,17 @@ package main
 // #endif
 // }
 //
-// void packet_handler(struct capture_context *cctx, size_t len, const uint8_t *packet) {
-//     int serverfd = cctx->fd;
-//
-//     DebugLog("packet_handler entered%s", "\n");
-//
-//     // Check to make sure the packet we just received wasn't sent
-//     // by us (the bridge), otherwise this is how loops happen
-//     pthread_mutex_lock(&qumu);
-//     struct packet *np;
-//     for (np = head.tqh_first; np != NULL; np = np->entries.tqe_next) {
-//         if( np->len == len ) {
-//             if( memcmp(packet, np->buffer, len) == 0 ) {
-//                 free(np->buffer);
-//                 TAILQ_REMOVE(&head, np, entries);
-//                 free(np);
-//                 pthread_mutex_unlock(&qumu);
-//                 DebugLog("packet_handler returned, skipping our own packet%s", "\n");
-//                 return;
-//             }
-//         }
-//     }
-//     pthread_mutex_unlock(&qumu);
-//
-//     // anything less than this isn't a valid frame
-//     if( len < 18 ) {
-//         DebugLog("packet_handler returned, skipping invalid packet%s", "\n");
-//         return;
-//     }
-//
-//     // Check to see if the destination address matches any addresses
-//     // in the list of source addresses we've seen on our network.
-//     // If it is, don't bother sending it over the bridge as the
-//     // recipient is local.
-//     struct addrlist *ap;
-//     struct addrlist *srcaddrmatch = NULL;
-//     for (ap = cctx->addrhead.tqh_first; ap != NULL; ap = ap->entries.tqe_next) {
-//         if( memcmp(packet, ap->srcaddr, 6) == 0 ) {
-//             DebugLog("packet_handler returned, skipping local packet%s", "\n");
-//             return;
-//         }
-//         // Since we're going through the list anyway, see if
-//         // the source address we've observed is already in the
-//         // list, in case we want to add it.
-//         if( memcmp(packet+6, ap->srcaddr, 6) == 0 ) {
-//             srcaddrmatch = ap;
-//         }
-//     }
-//
-//     // Destination is remote, but originated locally, so we can add
-//     // the source address to our list.
-//     if( !srcaddrmatch ) {
-//         struct addrlist *newaddr = calloc(1,sizeof(struct addrlist));
-//         memcpy(newaddr->srcaddr, packet+6, 6);
-//         TAILQ_INSERT_TAIL(&cctx->addrhead, newaddr, entries);
-//     }
-//
-//     uint32_t netlen = htonl(len);
-//     write(serverfd, &netlen, sizeof(netlen));
-//     write(serverfd, packet, len);
-//     DebugLog("Wrote packet of size %d\n", len);
-// }
-//
 // void init_cctx(struct capture_context *cctx, int fd) {
 //     cctx->fd = fd;
 //     TAILQ_INIT(&cctx->addrhead);
+// }
+//
+// void tailq_remove_packet(struct packet *np) {
+//     TAILQ_REMOVE(&head, np, entries);
+// }
+//
+// void tailq_insert_addr(struct capture_context *cctx, struct addrlist *newaddr) {
+//     TAILQ_INSERT_TAIL(&cctx->addrhead, newaddr, entries);
 // }
 //
 // void transmit(char *dev, int serverfd) {
@@ -274,8 +220,10 @@ package main
 // }
 import "C"
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
+	"unsafe"
 
 	"github.com/google/gopacket/pcap"
 	"github.com/spf13/pflag"
@@ -374,6 +322,67 @@ func capture(serverfd int) {
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
 		}
-		C.packet_handler(&cctx, C.size_t(ci.CaptureLength), (*C.uint8_t)(&data[0]))
+		packet_handler(&cctx, ci.CaptureLength, data)
 	}
+}
+
+func packet_handler(cctx *C.struct_capture_context, len int, packet []byte) {
+	serverfd := cctx.fd
+
+	// DebugLog("packet_handler entered%s", "\n")
+
+	// Check to make sure the packet we just received wasn't sent
+	// by us (the bridge), otherwise this is how loops happen
+	C.pthread_mutex_lock(&C.qumu)
+	for np := C.head.tqh_first; np != nil; np = np.entries.tqe_next {
+		if int(np.len) == len {
+			if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(np.buffer), C.size_t(len)) == 0 {
+				C.free(unsafe.Pointer(np.buffer))
+				C.tailq_remove_packet(np)
+				C.free(unsafe.Pointer(np))
+				C.pthread_mutex_unlock(&C.qumu)
+				// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
+				return
+			}
+		}
+	}
+	C.pthread_mutex_unlock(&C.qumu)
+
+	// anything less than this isn't a valid frame
+	if len < 18 {
+		// DebugLog("packet_handler returned, skipping invalid packet%s", "\n")
+		return
+	}
+
+	// Check to see if the destination address matches any addresses
+	// in the list of source addresses we've seen on our network.
+	// If it is, don't bother sending it over the bridge as the
+	// recipient is local.
+	srcaddrmatch := (*C.struct_addrlist)(nil)
+	for ap := cctx.addrhead.tqh_first; ap != nil; ap = ap.entries.tqe_next {
+		if C.memcmp(unsafe.Pointer(&packet[0]), unsafe.Pointer(&ap.srcaddr[0]), 6) == 0 {
+			// DebugLog("packet_handler returned, skipping local packet%s", "\n")
+			return
+		}
+		// Since we're going through the list anyway, see if
+		// the source address we've observed is already in the
+		// list, in case we want to add it.
+		if C.memcmp(unsafe.Pointer(&packet[6]), unsafe.Pointer(&ap.srcaddr[0]), 6) == 0 {
+			srcaddrmatch = ap
+		}
+	}
+
+	// Destination is remote, but originated locally, so we can add
+	// the source address to our list.
+	if srcaddrmatch == nil {
+		newaddr := (*C.struct_addrlist)(C.calloc(1, C.sizeof_struct_addrlist))
+		C.memcpy(unsafe.Pointer(&newaddr.srcaddr[0]), unsafe.Pointer(&packet[6]), 6)
+		C.tailq_insert_addr(cctx, newaddr)
+	}
+
+	netlen := [4]byte{}
+	binary.BigEndian.PutUint32(netlen[:], uint32(len))
+	C.write(serverfd, unsafe.Pointer(&netlen[0]), 4)
+	C.write(serverfd, unsafe.Pointer(&packet[0]), C.size_t(len))
+	// DebugLog("Wrote packet of size %d\n", len)
 }
