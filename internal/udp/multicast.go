@@ -121,6 +121,12 @@ func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
 			continue
 		}
 
+		if b.isSender(addr, packet) {
+			// If this bridge sent the packet, avoid a loop by ignoring
+			// it when it’s received back again via multicast.
+			continue
+		}
+
 		packet.Data, err = ioutil.ReadAll(r)
 		if err != nil {
 			continue
@@ -131,6 +137,24 @@ func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
 			recvCh <- *out
 		}
 	}
+}
+
+func (b *bridge) isSender(from *net.UDPAddr, packet LTOUPacket) bool {
+	if packet.Pid != uint32(b.pid) {
+		return false
+	}
+	addrs, err := b.iface.Addrs()
+	if err != nil {
+		return true
+	}
+	for _, addr := range addrs {
+		if ip, ok := addr.(*net.IPAddr); ok {
+			if ip.IP.Equal(from.IP) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
