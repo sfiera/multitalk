@@ -107,7 +107,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 
 // Marshals a packet to bytes.
 func Marshal(pak Packet) ([]byte, error) {
-	w := bytes.NewBuffer(make([]byte, 28))
+	w := bytes.NewBuffer([]byte{})
 	err := binary.Write(w, binary.BigEndian, pak)
 	if err != nil {
 		return nil, fmt.Errorf("write aarp: %s", err.Error())

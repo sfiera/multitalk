@@ -75,9 +75,9 @@ func logSnap(packet ethertalk.Packet, components []string) []string {
 	components = append(components, "snap")
 
 	switch packet.SNAPProto {
-	case ethertalk.AARP:
+	case ethertalk.AARPProto:
 		return logAARPPacket(packet, components)
-	case ethertalk.AppleTalk:
+	case ethertalk.AppleTalkProto:
 		return logAppleTalkPacket(packet, components)
 	default:
 		return append(components, "????")

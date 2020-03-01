@@ -97,8 +97,8 @@ func TCPClient(server string) (
 			// received, in a vague attempt at not polluting the network
 			// with unintended frames.
 			// DebugLog("ethertalk.Packet frame type: %x\n", type);
-			if !((packet.SNAPProto == ethertalk.AARP) ||
-				(packet.SNAPProto == ethertalk.AppleTalk)) {
+			if !((packet.SNAPProto == ethertalk.AARPProto) ||
+				(packet.SNAPProto == ethertalk.AppleTalkProto)) {
 				// Not an appletalk or aarp frame, drop it.
 				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", packet.Proto);
 				continue

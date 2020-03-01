@@ -34,13 +34,17 @@ import (
 	"fmt"
 	"io/ioutil"
 
+	"github.com/sfiera/multitalk/pkg/aarp"
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethernet"
 )
 
 var (
-	SNAP      = LinkHeader{0xAA, 0xAA, 0x03}
-	AppleTalk = SNAPProto{[3]byte{0x08, 0x00, 0x07}, 0x809B}
-	AARP      = SNAPProto{[3]byte{0x00, 0x00, 0x00}, 0x80F3}
+	SNAP           = LinkHeader{0xAA, 0xAA, 0x03}
+	AppleTalkProto = SNAPProto{[3]byte{0x08, 0x00, 0x07}, 0x809B}
+	AARPProto      = SNAPProto{[3]byte{0x00, 0x00, 0x00}, 0x80F3}
+
+	AppleTalkBroadcast = ethernet.Addr{0x09, 0x00, 0x07, 0xff, 0xff, 0xff}
 )
 
 type (
@@ -143,4 +147,38 @@ func Equal(a, b *Packet) bool {
 		(a.LinkHeader == b.LinkHeader) &&
 		(a.SNAPProto == b.SNAPProto) &&
 		(bytes.Compare(a.Data, b.Data) == 0))
+}
+
+func AppleTalk(src ethernet.Addr, inner ddp.ExtPacket) (*Packet, error) {
+	data, err := ddp.ExtMarshal(inner)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
+	}
+	return &Packet{
+		EthHeader: EthHeader{
+			Dst:  AppleTalkBroadcast,
+			Src:  src,
+			Size: 8 + uint16(len(data)),
+		},
+		LinkHeader: SNAP,
+		SNAPProto:  AppleTalkProto,
+		Data:       data,
+	}, nil
+}
+
+func AARP(src ethernet.Addr, inner aarp.Packet) (*Packet, error) {
+	data, err := aarp.Marshal(inner)
+	if err != nil {
+		return nil, fmt.Errorf("marshal aarp: %s", err.Error())
+	}
+	return &Packet{
+		EthHeader: EthHeader{
+			Dst:  AppleTalkBroadcast,
+			Src:  src,
+			Size: 8 + uint16(len(data)),
+		},
+		LinkHeader: SNAP,
+		SNAPProto:  AARPProto,
+		Data:       data,
+	}, nil
 }

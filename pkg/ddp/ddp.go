@@ -90,7 +90,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 
 // Marshals a packet to bytes.
 func Marshal(pak Packet) ([]byte, error) {
-	w := bytes.NewBuffer(make([]byte, 28))
+	w := bytes.NewBuffer([]byte{})
 	err := binary.Write(w, binary.BigEndian, pak.Header)
 	if err != nil {
 		return nil, fmt.Errorf("write ddp: %s", err.Error())
@@ -133,7 +133,7 @@ func ExtUnmarshal(data []byte, pak *ExtPacket) error {
 
 // Marshals a packet to bytes.
 func ExtMarshal(pak ExtPacket) ([]byte, error) {
-	w := bytes.NewBuffer(make([]byte, 28))
+	w := bytes.NewBuffer([]byte{})
 	err := binary.Write(w, binary.BigEndian, pak.ExtHeader)
 	if err != nil {
 		return nil, fmt.Errorf("write ddp: %s", err.Error())
