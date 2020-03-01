@@ -32,6 +32,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"sync"
@@ -47,17 +48,113 @@ const (
 var (
 	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
 	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
+	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
+
+	SNAP = LinkHeader{0xAA, 0xAA, 0x03}
 )
 
 type (
-	addr [6]byte
-
 	Interface struct {
-		Send chan<- []byte
-		Recv <-chan []byte
+		Send chan<- Packet
+		Recv <-chan Packet
+	}
+
+	EthAddr   [6]byte
+	EthHeader struct {
+		Dst, Src EthAddr
+		Size     uint16
+	}
+	LinkHeader struct {
+		DSAP, SSAP byte
+		Control    byte
+	}
+	SNAPHeader struct {
+		OUI   [3]byte
+		Proto uint16
+	}
+	Packet struct {
+		EthHeader
+		LinkHeader
+		SNAPHeader
+		Data []byte
+		Pad  []byte
 	}
 )
+
+func EthUnmarshal(data []byte, pak *Packet) error {
+	r := bytes.NewReader(data)
+
+	err := binary.Read(r, binary.BigEndian, &pak.EthHeader)
+	if err != nil {
+		return fmt.Errorf("read eth header: %s", err.Error())
+	}
+
+	err = binary.Read(r, binary.BigEndian, &pak.LinkHeader)
+	if err != nil {
+		return fmt.Errorf("read link header: %s", err.Error())
+	} else if pak.LinkHeader != SNAP {
+		return fmt.Errorf("read link header: not SNAP")
+	}
+
+	err = binary.Read(r, binary.BigEndian, &pak.SNAPHeader)
+	if err != nil {
+		return fmt.Errorf("read snap header: %s", err.Error())
+	}
+
+	pak.Data = make([]byte, pak.Size-8) // 8 = size of link + snap header
+	n, err := r.Read(pak.Data)
+	if err != nil {
+		return fmt.Errorf("read data: %s", err.Error())
+	} else if n < int(pak.Size) {
+		return fmt.Errorf("read data: incomplete data")
+	}
+
+	pak.Pad, err = ioutil.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read padding: %s", err.Error())
+	}
+
+	return nil
+}
+
+func EthMarshal(pak Packet) ([]byte, error) {
+	w := bytes.NewBuffer(make([]byte, 22+len(pak.Data)+len(pak.Pad)))
+	err := binary.Write(w, binary.BigEndian, pak.EthHeader)
+	if err != nil {
+		return nil, fmt.Errorf("write eth header: %s", err.Error())
+	}
+
+	err = binary.Write(w, binary.BigEndian, pak.LinkHeader)
+	if err != nil {
+		return nil, fmt.Errorf("write link header: %s", err.Error())
+	}
+
+	err = binary.Write(w, binary.BigEndian, pak.SNAPHeader)
+	if err != nil {
+		return nil, fmt.Errorf("write snap header: %s", err.Error())
+	}
+
+	n, err := w.Write(pak.Data)
+	if err != nil {
+		return nil, fmt.Errorf("write data: %s", err.Error())
+	} else if n < int(pak.Size) {
+		return nil, fmt.Errorf("write data: incomplete data")
+	}
+
+	n, err = w.Write(pak.Pad)
+	if err != nil {
+		return nil, fmt.Errorf("write padding: %s", err.Error())
+	} else if n < int(pak.Size) {
+		return nil, fmt.Errorf("write padding: incomplete data")
+	}
+
+	return w.Bytes(), nil
+}
+
+func EthEqual(a, b *Packet) bool {
+	return (a.Dst == b.Dst) && (a.Src == b.Src) && (bytes.Compare(a.Data, b.Data) == 0)
+}
 
 func main() {
 	pflag.Parse()
@@ -76,14 +173,14 @@ func main() {
 	}
 
 	for i, iface := range ifaces {
-		sends := []chan<- []byte{}
+		sends := []chan<- Packet{}
 		for j, other := range ifaces {
 			if i != j {
 				sends = append(sends, other.Send)
 			}
 		}
 
-		go func(recv <-chan []byte) {
+		go func(recv <-chan Packet) {
 			defer close(ch)
 			for packet := range recv {
 				for _, send := range sends {
@@ -96,7 +193,7 @@ func main() {
 }
 
 func Interfaces() (ifaces []Interface, _ error) {
-	niface := len(*server) + len(*ether)
+	niface := len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
 	} else if niface == 1 {
@@ -128,13 +225,18 @@ func TCPServer(server string) (*Interface, error) {
 		return nil, fmt.Errorf("dial %s: %s", server, err.Error())
 	}
 
-	sendCh := make(chan []byte)
-	recvCh := make(chan []byte)
+	sendCh := make(chan Packet)
+	recvCh := make(chan Packet)
 
 	go func() {
 		for packet := range sendCh {
-			_ = binary.Write(conn, binary.BigEndian, len(packet))
-			_, _ = conn.Write(packet)
+			bin, err := EthMarshal(packet)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
+				continue
+			}
+			_ = binary.Write(conn, binary.BigEndian, len(bin))
+			_, _ = conn.Write(bin)
 		}
 	}()
 
@@ -144,7 +246,7 @@ func TCPServer(server string) (*Interface, error) {
 			length := uint32(0)
 			err := binary.Read(conn, binary.BigEndian, &length)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
 				os.Exit(1)
 			}
 
@@ -154,28 +256,28 @@ func TCPServer(server string) (*Interface, error) {
 			}
 			// DebugLog("receiving packet of length: %u\n", length);
 
-			packet := make([]byte, length)
-			_, err = conn.Read(packet)
+			data := make([]byte, length)
+			_, err = conn.Read(data)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "read: %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
 				os.Exit(1)
 			}
 			// DebugLog("Successfully received packet\n%s", "");
 
-			/* 6 + 6 + 2 + 1 + 1 + 1 + 3 +2<type> + 4crc*/
-			if len(packet) < 26 {
-				// Too short to be a valid ethernet frame
+			packet := Packet{}
+			err = EthUnmarshal(data, &packet)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
 				continue
 			}
 
 			// Verify this is actuall an AppleTalk related frame we've
 			// received, in a vague attempt at not polluting the network
 			// with unintended frames.
-			frameType := frameType(packet)
 			// DebugLog("Packet frame type: %x\n", type);
-			if !((frameType == 0x809b) || (frameType == 0x80f3)) {
+			if !((packet.Proto == 0x809b) || (packet.Proto == 0x80f3)) {
 				// Not an appletalk or aarp frame, drop it.
-				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", frameType);
+				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", packet.Proto);
 				continue
 			}
 
@@ -191,7 +293,7 @@ func TCPServer(server string) (*Interface, error) {
 
 func EtherTalk(dev string) (*Interface, error) {
 	localPacketMu := sync.Mutex{}
-	localPackets := [][]byte{}
+	localPackets := []Packet{}
 
 	recvCh, err := capture(dev, &localPacketMu, &localPackets)
 	if err != nil {
@@ -209,8 +311,8 @@ func EtherTalk(dev string) (*Interface, error) {
 	}, nil
 }
 
-func capture(dev string, mu *sync.Mutex, localPackets *[][]byte) (<-chan []byte, error) {
-	ch := make(chan []byte)
+func capture(dev string, mu *sync.Mutex, localPackets *[]Packet) (<-chan Packet, error) {
+	ch := make(chan Packet)
 
 	// DebugLog("Using device: %s\n", dev)
 	handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
@@ -229,8 +331,8 @@ func capture(dev string, mu *sync.Mutex, localPackets *[][]byte) (<-chan []byte,
 		return nil, fmt.Errorf("install filter %s: %s", filter, err.Error())
 	}
 
-	go func(send chan<- []byte) {
-		localAddrs := map[addr]bool{}
+	go func(send chan<- Packet) {
+		localAddrs := map[EthAddr]bool{}
 		for {
 			data, ci, err := handle.ReadPacketData()
 			if err != nil {
@@ -240,18 +342,24 @@ func capture(dev string, mu *sync.Mutex, localPackets *[][]byte) (<-chan []byte,
 			if ci.CaptureLength != ci.Length {
 				// DebugLog("truncated packet! %s\n", "");
 			}
-			packet_handler(send, data, localAddrs, mu, localPackets)
+			packet := Packet{}
+			err = EthUnmarshal(data, &packet)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
+				continue
+			}
+			packet_handler(send, packet, localAddrs, mu, localPackets)
 		}
 	}(ch)
 	return ch, nil
 }
 
 func packet_handler(
-	send chan<- []byte,
-	packet []byte,
-	localAddrs map[addr]bool,
+	send chan<- Packet,
+	packet Packet,
+	localAddrs map[EthAddr]bool,
 	mu *sync.Mutex,
-	localPackets *[][]byte,
+	localPackets *[]Packet,
 ) {
 	// DebugLog("packet_handler entered%s", "\n")
 
@@ -259,7 +367,7 @@ func packet_handler(
 	// by us (the bridge), otherwise this is how loops happen
 	mu.Lock()
 	for i, np := range *localPackets {
-		if bytes.Compare(np, packet) == 0 {
+		if EthEqual(&np, &packet) {
 			last := len(*localPackets) - 1
 			(*localPackets)[i] = (*localPackets)[last]
 			*localPackets = (*localPackets)[:last]
@@ -270,31 +378,25 @@ func packet_handler(
 	}
 	mu.Unlock()
 
-	// anything less than this isn't a valid frame
-	if len(packet) < 18 {
-		// DebugLog("packet_handler returned, skipping invalid packet%s", "\n")
-		return
-	}
-
 	// Check to see if the destination address matches any addresses
 	// in the list of source addresses we've seen on our network.
 	// If it is, don't bother sending it over the bridge as the
 	// recipient is local.
-	if localAddrs[dstAddr(packet)] {
+	if localAddrs[packet.Dst] {
 		// DebugLog("packet_handler returned, skipping local packet%s", "\n")
 		return
 	}
 
 	// Destination is remote, but originated locally, so we can add
 	// the source address to our list.
-	localAddrs[srcAddr(packet)] = true
+	localAddrs[packet.Src] = true
 
 	send <- packet
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(dev string, mu *sync.Mutex, localPackets *[][]byte) (chan<- []byte, error) {
-	ch := make(chan []byte)
+func transmit(dev string, mu *sync.Mutex, localPackets *[]Packet) (chan<- Packet, error) {
+	ch := make(chan Packet)
 
 	// DebugLog("Using device: %s\n", dev);
 	handle, err := pcap.OpenLive(dev, 1, false, 1000)
@@ -302,7 +404,7 @@ func transmit(dev string, mu *sync.Mutex, localPackets *[][]byte) (chan<- []byte
 		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
 	}
 
-	go func(recv <-chan []byte) {
+	go func(recv <-chan Packet) {
 		for packet := range recv {
 			// printBuffer(packet)
 			// We now have a frame, time to send it out.
@@ -310,7 +412,12 @@ func transmit(dev string, mu *sync.Mutex, localPackets *[][]byte) (chan<- []byte
 			*localPackets = append(*localPackets, packet)
 			mu.Unlock()
 
-			err = handle.WritePacketData(packet)
+			bin, err := EthMarshal(packet)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "localtalk send: %s\n", err.Error())
+				continue
+			}
+			err = handle.WritePacketData(bin)
 			// DebugLog("pcap_sendpacket returned %d\n", pret);
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
@@ -319,18 +426,4 @@ func transmit(dev string, mu *sync.Mutex, localPackets *[][]byte) (chan<- []byte
 		}
 	}(ch)
 	return ch, nil
-}
-
-func srcAddr(packet []byte) (a addr) {
-	copy(a[:], packet[6:12])
-	return
-}
-
-func dstAddr(packet []byte) (a addr) {
-	copy(a[:], packet[0:6])
-	return
-}
-
-func frameType(packet []byte) uint16 {
-	return binary.BigEndian.Uint16(packet[20:22])
 }
