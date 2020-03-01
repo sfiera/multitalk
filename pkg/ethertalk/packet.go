@@ -108,7 +108,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 
 // Marshals a packet to bytes.
 func Marshal(pak Packet) ([]byte, error) {
-	w := bytes.NewBuffer(make([]byte, 22+len(pak.Data)+len(pak.Pad)))
+	w := bytes.NewBuffer([]byte{})
 	err := binary.Write(w, binary.BigEndian, pak.EthHeader)
 	if err != nil {
 		return nil, fmt.Errorf("write eth header: %s", err.Error())
