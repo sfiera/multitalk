@@ -29,9 +29,19 @@
 package dbg
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/sfiera/multitalk/pkg/ethertalk"
+	"github.com/sfiera/multitalk/pkg/ethertalk/aarp"
+)
+
+var (
+	llapOps = map[uint16]string{
+		aarp.RequestOp:  "request",
+		aarp.ResponseOp: "response",
+		aarp.ProbeOp:    "probe",
+	}
 )
 
 func Logger() (
@@ -43,11 +53,78 @@ func Logger() (
 
 	go func() {
 		for packet := range sendCh {
-			log.Printf("%+v", packet)
+			if packet.LinkHeader != ethertalk.SNAP {
+				log.Printf(
+					"%s <- %s: ????",
+					ethAddr(packet.Dst), ethAddr(packet.Src),
+				)
+				continue
+			}
+
+			switch packet.SNAPProto {
+			case ethertalk.AARP:
+				logAARPPacket(packet)
+			case ethertalk.AppleTalk:
+				logAppleTalkPacket(packet)
+			default:
+				log.Printf(
+					"%s <- %s: snap: ????",
+					ethAddr(packet.Dst), ethAddr(packet.Src),
+				)
+			}
 		}
 	}()
 
 	close(recvCh)
 
 	return sendCh, recvCh
+}
+
+func logAARPPacket(packet ethertalk.Packet) {
+	a := aarp.Packet{}
+	err := aarp.Unmarshal(packet.Data, &a)
+	if err != nil {
+		log.Printf(
+			"%s <- %s: snap: aarp: ????",
+			ethAddr(packet.Dst), ethAddr(packet.Src),
+		)
+		return
+	}
+
+	opname := llapOps[a.Opcode]
+	if opname == "" {
+		log.Printf(
+			"%s <- %s: snap: aarp: eth-llap %02x",
+			ethAddr(packet.Dst), ethAddr(packet.Src),
+			a.Opcode,
+		)
+		return
+	}
+
+	log.Printf(
+		"%s <- %s: snap: aarp: eth-llap %s %s/%s -> %s/%s",
+		ethAddr(packet.Dst), ethAddr(packet.Src),
+		opname,
+		ethAddr(a.Src.Hardware), atalkAddr(a.Src.Proto),
+		ethAddr(a.Dst.Hardware), atalkAddr(a.Dst.Proto),
+	)
+}
+
+func logAppleTalkPacket(packet ethertalk.Packet) {
+	log.Printf(
+		"%s <- %s: snap: atlk: %+v",
+		ethAddr(packet.Dst), ethAddr(packet.Src),
+		packet.Data,
+	)
+}
+
+func ethAddr(addr ethertalk.EthAddr) string {
+	return fmt.Sprintf(
+		"%02x:%02x:%02x:%02x:%02x:%02x",
+		addr[0], addr[1], addr[2], addr[3], addr[4], addr[5],
+	)
+}
+
+func atalkAddr(addr aarp.AtalkAddr) string {
+	return fmt.Sprintf("%d.%d", addr.Network, addr.Node)
 }
