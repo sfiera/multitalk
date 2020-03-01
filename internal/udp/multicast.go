@@ -103,6 +103,7 @@ func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		l := b.etherTalkToUDP(packet)
 		if l == nil {
+			fmt.Fprintf(os.Stderr, "send udp: conversion failed\n")
 			continue
 		}
 
@@ -110,17 +111,23 @@ func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
 
 		err := binary.Write(buf, binary.BigEndian, l.LTOUHeader)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "write udp header: %s\n", err.Error())
 			continue
 		}
 
 		n, err := buf.Write(l.Data)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "write udp body: %s\n", err.Error())
 			continue
 		} else if n < len(l.Data) {
+			fmt.Fprintf(os.Stderr, "write udp body: incomplete write (%d < %d)\n", n, len(l.Data))
 			continue
 		}
 
-		_, _ = b.conn.Write(buf.Bytes())
+		_, err = b.conn.WriteToUDP(buf.Bytes(), address)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "send udp: %s\n", err.Error())
+		}
 	}
 }
 
