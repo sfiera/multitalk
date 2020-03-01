@@ -33,9 +33,9 @@ import (
 	"log"
 	"strings"
 
+	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
-	"github.com/sfiera/multitalk/pkg/ethertalk/aarp"
 )
 
 var (
