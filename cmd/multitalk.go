@@ -42,7 +42,7 @@ import (
 )
 
 const (
-	versionString = "abridge 0.1"
+	versionString = "multitalk 0.1"
 )
 
 var (
