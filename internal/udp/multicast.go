@@ -149,14 +149,28 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) *LTOUPacket {
 		return nil
 	}
 
+	reg := ddp.Packet{
+		Header: ddp.Header{
+			Size:    5 + uint16(len(ext.Data)),
+			DstPort: ext.DstPort,
+			SrcPort: ext.SrcPort,
+			Proto:   ext.Proto,
+		},
+		Data: ext.Data,
+	}
+	data, err := ddp.Marshal(reg)
+	if err != nil {
+		return nil
+	}
+
 	return &LTOUPacket{
 		LTOUHeader: LTOUHeader{
 			Pid:     uint32(b.pid),
 			DstNode: ext.DstNode,
 			SrcNode: ext.SrcNode,
-			Kind:    0x02,
+			Kind:    0x01,
 		},
-		Data: packet.Data,
+		Data: data,
 	}
 }
 
