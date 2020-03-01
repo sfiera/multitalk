@@ -82,6 +82,7 @@ type (
 	}
 )
 
+// Unmarshals a packet from bytes.
 func EthUnmarshal(data []byte, pak *Packet) error {
 	r := bytes.NewReader(data)
 
@@ -118,6 +119,7 @@ func EthUnmarshal(data []byte, pak *Packet) error {
 	return nil
 }
 
+// Marshals a packet to bytes.
 func EthMarshal(pak Packet) ([]byte, error) {
 	w := bytes.NewBuffer(make([]byte, 22+len(pak.Data)+len(pak.Pad)))
 	err := binary.Write(w, binary.BigEndian, pak.EthHeader)
@@ -152,8 +154,12 @@ func EthMarshal(pak Packet) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
+// Returns true if two packets are equal. Ignores padding.
 func EthEqual(a, b *Packet) bool {
-	return (a.Dst == b.Dst) && (a.Src == b.Src) && (bytes.Compare(a.Data, b.Data) == 0)
+	return ((a.EthHeader == b.EthHeader) &&
+		(a.LinkHeader == b.LinkHeader) &&
+		(a.SNAPHeader == b.SNAPHeader) &&
+		(bytes.Compare(a.Data, b.Data) == 0))
 }
 
 func main() {
