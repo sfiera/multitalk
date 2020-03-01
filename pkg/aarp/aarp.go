@@ -34,7 +34,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sfiera/multitalk/pkg/ethertalk"
+	"github.com/sfiera/multitalk/pkg/ethernet"
 )
 
 const (
@@ -67,7 +67,7 @@ type (
 		HardwareSize, ProtoSize uint8
 	}
 	AddrPair struct {
-		Hardware ethertalk.EthAddr
+		Hardware ethernet.Addr
 		Proto    AtalkAddr
 	}
 	Body struct {
@@ -141,7 +141,7 @@ func Response(src, dst AddrPair) Packet {
 }
 
 // AARP packet for checking that `query` is available, from `src`.
-func Probe(src ethertalk.EthAddr, query AtalkAddr) Packet {
+func Probe(src ethernet.Addr, query AtalkAddr) Packet {
 	return Packet{
 		Header: EthernetLLAPBridging,
 		Body: Body{

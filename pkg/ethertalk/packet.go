@@ -33,6 +33,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+
+	"github.com/sfiera/multitalk/pkg/ethernet"
 )
 
 var (
@@ -42,9 +44,8 @@ var (
 )
 
 type (
-	EthAddr   [6]byte
 	EthHeader struct {
-		Dst, Src EthAddr
+		Dst, Src ethernet.Addr
 		Size     uint16
 	}
 	LinkHeader struct {

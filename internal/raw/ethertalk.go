@@ -35,6 +35,7 @@ import (
 
 	"github.com/google/gopacket/pcap"
 
+	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -80,7 +81,7 @@ func capture(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (<-ch
 	}
 
 	go func(send chan<- ethertalk.Packet) {
-		localAddrs := map[ethertalk.EthAddr]bool{}
+		localAddrs := map[ethernet.Addr]bool{}
 		for {
 			data, ci, err := handle.ReadPacketData()
 			if err != nil {
@@ -105,7 +106,7 @@ func capture(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (<-ch
 func packet_handler(
 	send chan<- ethertalk.Packet,
 	packet ethertalk.Packet,
-	localAddrs map[ethertalk.EthAddr]bool,
+	localAddrs map[ethernet.Addr]bool,
 	mu *sync.Mutex,
 	localPackets *[]ethertalk.Packet,
 ) {

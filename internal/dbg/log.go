@@ -35,6 +35,7 @@ import (
 
 	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
+	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -120,7 +121,7 @@ func logAppleTalkPacket(packet ethertalk.Packet, components []string) []string {
 	return append(components, fmt.Sprintf("%+v", d.Data))
 }
 
-func ethAddr(addr ethertalk.EthAddr) string {
+func ethAddr(addr ethernet.Addr) string {
 	return fmt.Sprintf(
 		"%02x:%02x:%02x:%02x:%02x:%02x",
 		addr[0], addr[1], addr[2], addr[3], addr[4], addr[5],
