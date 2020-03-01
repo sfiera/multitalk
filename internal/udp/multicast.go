@@ -101,7 +101,82 @@ func Multicast(iface string) (
 
 func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
-		_ = packet
+		l := b.etherTalkToUDP(packet)
+		if l == nil {
+			continue
+		}
+
+		buf := bytes.NewBuffer([]byte{})
+
+		err := binary.Write(buf, binary.BigEndian, l.LTOUHeader)
+		if err != nil {
+			continue
+		}
+
+		n, err := buf.Write(l.Data)
+		if err != nil {
+			continue
+		} else if n < len(l.Data) {
+			continue
+		}
+
+		_, _ = b.conn.Write(buf.Bytes())
+	}
+}
+
+func (b *bridge) etherTalkToUDP(packet ethertalk.Packet) *LTOUPacket {
+	switch packet.SNAPProto {
+	case ethertalk.AppleTalkProto:
+		return b.ddpToUDP(packet)
+	case ethertalk.AARPProto:
+		return b.aarpToUDP(packet)
+	default:
+		return nil
+	}
+}
+
+func (b *bridge) ddpToUDP(packet ethertalk.Packet) *LTOUPacket {
+	ext := ddp.ExtPacket{}
+	err := ddp.ExtUnmarshal(packet.Data, &ext)
+	if err != nil {
+		return nil
+	}
+
+	return &LTOUPacket{
+		LTOUHeader: LTOUHeader{
+			Pid:     uint32(b.pid),
+			DstNode: ext.DstNode,
+			SrcNode: ext.SrcNode,
+			Kind:    0x02,
+		},
+		Data: packet.Data,
+	}
+}
+
+func (b *bridge) aarpToUDP(packet ethertalk.Packet) *LTOUPacket {
+	a := aarp.Packet{}
+	err := aarp.Unmarshal(packet.Data, &a)
+	if err != nil {
+		return nil
+	}
+
+	kind := uint8(0)
+	switch a.Opcode {
+	case aarp.ProbeOp:
+		kind = 0x81
+	case aarp.ResponseOp:
+		kind = 0x82
+	default:
+		return nil
+	}
+
+	return &LTOUPacket{
+		LTOUHeader: LTOUHeader{
+			Pid:     uint32(b.pid),
+			DstNode: a.Dst.Proto.Node,
+			SrcNode: a.Src.Proto.Node,
+			Kind:    kind,
+		},
 	}
 }
 
@@ -182,7 +257,7 @@ func (b *bridge) udpToDDP(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packe
 	ext := ddp.ExtPacket{
 		ExtHeader: ddp.ExtHeader{
 			Size:    d.Size + 8,
-			DstNet:  defaultNet,
+			DstNet:  0,
 			DstNode: packet.DstNode,
 			DstPort: d.DstPort,
 			SrcNet:  defaultNet,
