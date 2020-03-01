@@ -31,7 +31,9 @@ package dbg
 import (
 	"fmt"
 	"log"
+	"strings"
 
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 	"github.com/sfiera/multitalk/pkg/ethertalk/aarp"
 )
@@ -53,25 +55,10 @@ func Logger() (
 
 	go func() {
 		for packet := range sendCh {
-			if packet.LinkHeader != ethertalk.SNAP {
-				log.Printf(
-					"%s <- %s: ????",
-					ethAddr(packet.Dst), ethAddr(packet.Src),
-				)
-				continue
+			components := []string{
+				fmt.Sprintf("%s <- %s", ethAddr(packet.Dst), ethAddr(packet.Src)),
 			}
-
-			switch packet.SNAPProto {
-			case ethertalk.AARP:
-				logAARPPacket(packet)
-			case ethertalk.AppleTalk:
-				logAppleTalkPacket(packet)
-			default:
-				log.Printf(
-					"%s <- %s: snap: ????",
-					ethAddr(packet.Dst), ethAddr(packet.Src),
-				)
-			}
+			log.Print(strings.Join(logSnap(packet, components), ": "))
 		}
 	}()
 
@@ -80,42 +67,57 @@ func Logger() (
 	return sendCh, recvCh
 }
 
-func logAARPPacket(packet ethertalk.Packet) {
+func logSnap(packet ethertalk.Packet, components []string) []string {
+	if packet.LinkHeader != ethertalk.SNAP {
+		return append(components, "????")
+	}
+	components = append(components, "snap")
+
+	switch packet.SNAPProto {
+	case ethertalk.AARP:
+		return logAARPPacket(packet, components)
+	case ethertalk.AppleTalk:
+		return logAppleTalkPacket(packet, components)
+	default:
+		return append(components, "????")
+	}
+}
+
+func logAARPPacket(packet ethertalk.Packet, components []string) []string {
+	components = append(components, "aarp")
 	a := aarp.Packet{}
 	err := aarp.Unmarshal(packet.Data, &a)
 	if err != nil {
-		log.Printf(
-			"%s <- %s: snap: aarp: ????",
-			ethAddr(packet.Dst), ethAddr(packet.Src),
-		)
-		return
+		return append(components, "????")
 	}
 
 	opname := llapOps[a.Opcode]
 	if opname == "" {
-		log.Printf(
-			"%s <- %s: snap: aarp: eth-llap %02x",
-			ethAddr(packet.Dst), ethAddr(packet.Src),
-			a.Opcode,
-		)
-		return
+		return append(components, fmt.Sprintf("eth-llap %02x", a.Opcode))
 	}
-
-	log.Printf(
-		"%s <- %s: snap: aarp: eth-llap %s %s/%s -> %s/%s",
-		ethAddr(packet.Dst), ethAddr(packet.Src),
+	return append(components, fmt.Sprintf(
+		"eth-llap %s %s/%s -> %s/%s",
 		opname,
 		ethAddr(a.Src.Hardware), atalkAddr(a.Src.Proto),
-		ethAddr(a.Dst.Hardware), atalkAddr(a.Dst.Proto),
-	)
+		ethAddr(a.Dst.Hardware), atalkAddr(a.Dst.Proto)))
 }
 
-func logAppleTalkPacket(packet ethertalk.Packet) {
-	log.Printf(
-		"%s <- %s: snap: atlk: %+v",
-		ethAddr(packet.Dst), ethAddr(packet.Src),
-		packet.Data,
-	)
+func logAppleTalkPacket(packet ethertalk.Packet, components []string) []string {
+	components = append(components, "atlk")
+	d := ddp.ExtPacket{}
+	err := ddp.ExtUnmarshal(packet.Data, &d)
+	if err != nil {
+		return append(components, "????")
+	}
+
+	components = append(components, fmt.Sprintf(
+		"ddp [%04x] %d.%d:%d <- %d.%d:%d %02x",
+		d.Cksum,
+		d.DstNet, d.DstNode, d.DstPort,
+		d.SrcNet, d.SrcNode, d.SrcPort,
+		d.Proto,
+	))
+	return append(components, fmt.Sprintf("%+v", d.Data))
 }
 
 func ethAddr(addr ethertalk.EthAddr) string {
