@@ -36,7 +36,9 @@ import (
 )
 
 var (
-	SNAP = LinkHeader{0xAA, 0xAA, 0x03}
+	SNAP      = LinkHeader{0xAA, 0xAA, 0x03}
+	AppleTalk = SNAPProto{[3]byte{0x08, 0x00, 0x07}, 0x809B}
+	AARP      = SNAPProto{[3]byte{0x00, 0x00, 0x00}, 0x80F3}
 )
 
 type (
@@ -49,14 +51,14 @@ type (
 		DSAP, SSAP byte
 		Control    byte
 	}
-	SNAPHeader struct {
+	SNAPProto struct {
 		OUI   [3]byte
 		Proto uint16
 	}
 	Packet struct {
 		EthHeader
 		LinkHeader
-		SNAPHeader
+		SNAPProto
 		Data []byte
 		Pad  []byte
 	}
@@ -78,12 +80,12 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read link header: not SNAP")
 	}
 
-	err = binary.Read(r, binary.BigEndian, &pak.SNAPHeader)
+	err = binary.Read(r, binary.BigEndian, &pak.SNAPProto)
 	if err != nil {
-		return fmt.Errorf("read snap header: %s", err.Error())
+		return fmt.Errorf("read snap proto: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, pak.Size-8) // 8 = size of link + snap header
+	pak.Data = make([]byte, pak.Size-8) // 8 = size of link header + snap proto
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read data: %s", err.Error())
@@ -112,9 +114,9 @@ func Marshal(pak Packet) ([]byte, error) {
 		return nil, fmt.Errorf("write link header: %s", err.Error())
 	}
 
-	err = binary.Write(w, binary.BigEndian, pak.SNAPHeader)
+	err = binary.Write(w, binary.BigEndian, pak.SNAPProto)
 	if err != nil {
-		return nil, fmt.Errorf("write snap header: %s", err.Error())
+		return nil, fmt.Errorf("write snap proto: %s", err.Error())
 	}
 
 	n, err := w.Write(pak.Data)
@@ -138,6 +140,6 @@ func Marshal(pak Packet) ([]byte, error) {
 func Equal(a, b *Packet) bool {
 	return ((a.EthHeader == b.EthHeader) &&
 		(a.LinkHeader == b.LinkHeader) &&
-		(a.SNAPHeader == b.SNAPHeader) &&
+		(a.SNAPProto == b.SNAPProto) &&
 		(bytes.Compare(a.Data, b.Data) == 0))
 }

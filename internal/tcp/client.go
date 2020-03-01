@@ -93,11 +93,12 @@ func TCPClient(server string) (
 				continue
 			}
 
-			// Verify this is actuall an AppleTalk related frame we've
+			// Verify this is actually an AppleTalk related frame we've
 			// received, in a vague attempt at not polluting the network
 			// with unintended frames.
 			// DebugLog("ethertalk.Packet frame type: %x\n", type);
-			if !((packet.Proto == 0x809b) || (packet.Proto == 0x80f3)) {
+			if !((packet.SNAPProto == ethertalk.AARP) ||
+				(packet.SNAPProto == ethertalk.AppleTalk)) {
 				// Not an appletalk or aarp frame, drop it.
 				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", packet.Proto);
 				continue
