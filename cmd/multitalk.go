@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2009 Rob Braun <bbraun@synack.net>
+// Copyright (c) 2009-2020 Rob Braun <bbraun@synack.net> and others
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
