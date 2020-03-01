@@ -1,19 +1,11 @@
-CC=gcc
-SRCS=toofar.c kwai.c
-OBJS=$(subst .c,.o,$(SRCS))
-EXES=$(subst .c,,$(SRCS))
-#CFLAGS=-DDEBUG=1
+OUT=multitalk
 
-all: $(EXES)
+all: $(OUT)
 
-clean:
-	rm -f $(OBJS) $(EXES)
-
-toofar: toofar.go
+.PHONY: multitalk
+multitalk: cmd/multitalk.go
 	go build -o $@ $^
 
-kwai: kwai.o
-	$(CC) $(LDFLAGS) -o $@ $^
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $<
+.PHONY: clean
+clean:
+	rm -f $(OUT)
