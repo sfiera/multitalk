@@ -34,6 +34,7 @@ import (
 
 	"github.com/spf13/pflag"
 
+	"github.com/sfiera/multitalk/internal/dbg"
 	"github.com/sfiera/multitalk/internal/raw"
 	"github.com/sfiera/multitalk/internal/tcp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
@@ -47,6 +48,7 @@ var (
 	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
 	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
 	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
+	debug   = pflag.BoolP("debug", "d", false, "log packets")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 )
 
@@ -65,8 +67,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	ch := make(chan bool)
-
 	ifaces, err := Interfaces()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -82,7 +82,6 @@ func main() {
 		}
 
 		go func(recv <-chan ethertalk.Packet) {
-			defer close(ch)
 			for packet := range recv {
 				for _, send := range sends {
 					send <- packet
@@ -90,14 +89,15 @@ func main() {
 			}
 		}(iface.Recv)
 	}
-	<-ch
+
+	<-make(chan bool)
 }
 
 func Interfaces() (ifaces []Interface, _ error) {
 	niface := len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
-	} else if niface == 1 {
+	} else if (niface == 1) && !*debug {
 		return nil, fmt.Errorf("only one interface specified")
 	}
 
@@ -114,6 +114,11 @@ func Interfaces() (ifaces []Interface, _ error) {
 		if err != nil {
 			return nil, err
 		}
+		ifaces = append(ifaces, Interface{send, recv})
+	}
+
+	if *debug {
+		send, recv := dbg.Logger()
 		ifaces = append(ifaces, Interface{send, recv})
 	}
 
