@@ -87,8 +87,8 @@ func Unmarshal(data []byte, pak *Packet) error {
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read data: %s", err.Error())
-	} else if n < int(pak.Size) {
-		return fmt.Errorf("read data: incomplete data")
+	} else if n < len(pak.Data) {
+		return fmt.Errorf("read data: incomplete data (%d < %d)", n, len(pak.Data))
 	}
 
 	pak.Pad, err = ioutil.ReadAll(r)
@@ -120,15 +120,15 @@ func Marshal(pak Packet) ([]byte, error) {
 	n, err := w.Write(pak.Data)
 	if err != nil {
 		return nil, fmt.Errorf("write data: %s", err.Error())
-	} else if n < int(pak.Size) {
-		return nil, fmt.Errorf("write data: incomplete data")
+	} else if n < len(pak.Data) {
+		return nil, fmt.Errorf("write data: incomplete data (%d < %d)", n, len(pak.Data))
 	}
 
 	n, err = w.Write(pak.Pad)
 	if err != nil {
 		return nil, fmt.Errorf("write padding: %s", err.Error())
-	} else if n < int(pak.Size) {
-		return nil, fmt.Errorf("write padding: incomplete data")
+	} else if n < len(pak.Pad) {
+		return nil, fmt.Errorf("write padding: incomplete data (%d < %d)", n, len(pak.Pad))
 	}
 
 	return w.Bytes(), nil
