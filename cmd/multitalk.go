@@ -104,28 +104,32 @@ func Interfaces() (ifaces []Interface, _ error) {
 	}
 
 	for _, s := range *server {
-		srv, err := TCPServer(s)
+		send, recv, err := TCPServer(s)
 		if err != nil {
 			return nil, err
 		}
-		ifaces = append(ifaces, *srv)
+		ifaces = append(ifaces, Interface{send, recv})
 	}
 
 	for _, dev := range *ether {
-		lcl, err := EtherTalk(dev)
+		send, recv, err := EtherTalk(dev)
 		if err != nil {
 			return nil, err
 		}
-		ifaces = append(ifaces, *lcl)
+		ifaces = append(ifaces, Interface{send, recv})
 	}
 
 	return
 }
 
-func TCPServer(server string) (*Interface, error) {
+func TCPServer(server string) (
+	send chan<- ethertalk.Packet,
+	recv <-chan ethertalk.Packet,
+	_ error,
+) {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
-		return nil, fmt.Errorf("dial %s: %s", server, err.Error())
+		return nil, nil, fmt.Errorf("dial %s: %s", server, err.Error())
 	}
 
 	sendCh := make(chan ethertalk.Packet)
@@ -188,30 +192,28 @@ func TCPServer(server string) (*Interface, error) {
 		}
 	}()
 
-	return &Interface{
-		Send: sendCh,
-		Recv: recvCh,
-	}, nil
+	return sendCh, recvCh, nil
 }
 
-func EtherTalk(dev string) (*Interface, error) {
+func EtherTalk(dev string) (
+	send chan<- ethertalk.Packet,
+	recv <-chan ethertalk.Packet,
+	_ error,
+) {
 	localPacketMu := sync.Mutex{}
 	localPackets := []ethertalk.Packet{}
 
 	recvCh, err := capture(dev, &localPacketMu, &localPackets)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sendCh, err := transmit(dev, &localPacketMu, &localPackets)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return &Interface{
-		Send: sendCh,
-		Recv: recvCh,
-	}, nil
+	return sendCh, recvCh, nil
 }
 
 func capture(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (<-chan ethertalk.Packet, error) {
