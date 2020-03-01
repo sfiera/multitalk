@@ -61,6 +61,13 @@ type (
 		LTOUHeader
 		Data []byte
 	}
+
+	bridge struct {
+		pid   int
+		iface *net.Interface
+		eth   ethernet.Addr
+		conn  *net.UDPConn
+	}
 )
 
 func Multicast(iface string) (
@@ -73,10 +80,13 @@ func Multicast(iface string) (
 		return nil, nil, fmt.Errorf("interface %s: %s", iface, err.Error())
 	}
 
-	ethAddr := ethernet.Addr{}
-	copy(ethAddr[:], i.HardwareAddr)
+	b := bridge{
+		pid:   os.Getpid(),
+		iface: i,
+	}
+	copy(b.eth[:], i.HardwareAddr)
 
-	conn, err := net.ListenMulticastUDP("udp", i, address)
+	b.conn, err = net.ListenMulticastUDP("udp", i, address)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen %s: %s", iface, err.Error())
 	}
@@ -84,59 +94,61 @@ func Multicast(iface string) (
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
 
-	go func(sendCh <-chan ethertalk.Packet) {
-		for packet := range sendCh {
-			_ = packet
-		}
-	}(sendCh)
-
-	go func(recvCh chan<- ethertalk.Packet) {
-		bin := make([]byte, 700)
-		for {
-			n, addr, err := conn.ReadFromUDP(bin)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "udp recv: %s\n", err.Error())
-				os.Exit(1)
-			}
-
-			r := bytes.NewReader(bin[:n])
-			packet := LTOUPacket{}
-			err = binary.Read(r, binary.BigEndian, &packet.LTOUHeader)
-			if err != nil {
-				continue
-			}
-
-			packet.Data, err = ioutil.ReadAll(r)
-			if err != nil {
-				continue
-			}
-
-			out := convert(ethAddr, addr, packet)
-			if out != nil {
-				recvCh <- *out
-			}
-		}
-	}(recvCh)
-
+	go b.recv(sendCh)
+	go b.send(recvCh)
 	return sendCh, recvCh, nil
 }
 
-func convert(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
+func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
+	for packet := range sendCh {
+		_ = packet
+	}
+}
+
+func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
+	bin := make([]byte, 700)
+	for {
+		n, addr, err := b.conn.ReadFromUDP(bin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "udp recv: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		r := bytes.NewReader(bin[:n])
+		packet := LTOUPacket{}
+		err = binary.Read(r, binary.BigEndian, &packet.LTOUHeader)
+		if err != nil {
+			continue
+		}
+
+		packet.Data, err = ioutil.ReadAll(r)
+		if err != nil {
+			continue
+		}
+
+		out := b.udpToEtherTalk(addr, packet)
+		if out != nil {
+			recvCh <- *out
+		}
+	}
+}
+
+func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
 	switch packet.Kind {
 	case 0x01:
-		return regDDP(ethAddr, addr, packet)
+		return b.udpToDDP(addr, packet)
 	case 0x02:
-		return extDDP(ethAddr, addr, packet)
+		return b.udpToExtDDP(addr, packet)
 	case 0x81:
-		return probe(ethAddr, addr, packet)
+		return b.udpToProbe(addr, packet)
 	case 0x82:
-		return ack(ethAddr, addr, packet)
+		return b.udpToAck(addr, packet)
 	default:
 		return nil
 	}
 }
 
-func regDDP(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
+func (b *bridge) udpToDDP(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
 	d := ddp.Packet{}
 	err := ddp.Unmarshal(packet.Data, &d)
 	if err != nil {
@@ -157,30 +169,30 @@ func regDDP(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethert
 		Data: d.Data,
 	}
 
-	out, err := ethertalk.AppleTalk(ethAddr, ext)
+	out, err := ethertalk.AppleTalk(b.eth, ext)
 	if err != nil {
 		return nil
 	}
 	return out
 }
 
-func extDDP(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
+func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
 	d := ddp.ExtPacket{}
 	err := ddp.ExtUnmarshal(packet.Data, &d)
 	if err != nil {
 		return nil
 	}
-	out, err := ethertalk.AppleTalk(ethAddr, d)
+	out, err := ethertalk.AppleTalk(b.eth, d)
 	if err != nil {
 		return nil
 	}
 	return out
 }
 
-func probe(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
+func (b *bridge) udpToProbe(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
 	out, err := ethertalk.AARP(
-		ethAddr,
-		aarp.Probe(ethAddr, aarp.AtalkAddr{Network: defaultNet, Node: packet.DstNode}),
+		b.eth,
+		aarp.Probe(b.eth, aarp.AtalkAddr{Network: defaultNet, Node: packet.DstNode}),
 	)
 	if err != nil {
 		return nil
@@ -188,14 +200,14 @@ func probe(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *etherta
 	return out
 }
 
-func ack(ethAddr ethernet.Addr, addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
-	out, err := ethertalk.AARP(ethAddr, aarp.Response(
+func (b *bridge) udpToAck(addr *net.UDPAddr, packet LTOUPacket) *ethertalk.Packet {
+	out, err := ethertalk.AARP(b.eth, aarp.Response(
 		aarp.AddrPair{
-			Hardware: ethAddr,
+			Hardware: b.eth,
 			Proto:    aarp.AtalkAddr{Network: defaultNet, Node: packet.SrcNode},
 		},
 		aarp.AddrPair{
-			Hardware: ethAddr,
+			Hardware: b.eth,
 			Proto:    aarp.AtalkAddr{Network: defaultNet, Node: packet.DstNode},
 		},
 	))
