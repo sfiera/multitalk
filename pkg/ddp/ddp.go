@@ -40,6 +40,16 @@ const (
 )
 
 type (
+	Header struct {
+		Size             uint16
+		DstPort, SrcPort uint8
+		Proto            uint8
+	}
+	Packet struct {
+		Header
+		Data []byte
+	}
+
 	ExtHeader struct {
 		Size, Cksum      uint16
 		DstNet, SrcNet   uint16
@@ -52,6 +62,49 @@ type (
 		Data []byte
 	}
 )
+
+// Unmarshals a packet from bytes.
+func Unmarshal(data []byte, pak *Packet) error {
+	r := bytes.NewReader(data)
+
+	err := binary.Read(r, binary.BigEndian, &pak.Header)
+	if err != nil {
+		return fmt.Errorf("read ddp header: %s", err.Error())
+	}
+
+	pak.Data = make([]byte, (pak.Size&LengthMask)-5) // 5 = size of header
+	n, err := r.Read(pak.Data)
+	if err != nil {
+		return fmt.Errorf("read ddp: %s", err.Error())
+	} else if n < len(pak.Data) {
+		return fmt.Errorf("read ddp: incomplete data (%d < %d)", n, len(pak.Data))
+	}
+
+	_, err = r.ReadByte()
+	if err != io.EOF {
+		return fmt.Errorf("read ddp: excess data")
+	}
+
+	return nil
+}
+
+// Marshals a packet to bytes.
+func Marshal(pak Packet) ([]byte, error) {
+	w := bytes.NewBuffer(make([]byte, 28))
+	err := binary.Write(w, binary.BigEndian, pak.Header)
+	if err != nil {
+		return nil, fmt.Errorf("write ddp: %s", err.Error())
+	}
+
+	n, err := w.Write(pak.Data)
+	if err != nil {
+		return nil, fmt.Errorf("write data: %s", err.Error())
+	} else if n < len(pak.Data) {
+		return nil, fmt.Errorf("write data: incomplete data (%d < %d)", n, len(pak.Data))
+	}
+
+	return w.Bytes(), nil
+}
 
 // Unmarshals a packet from bytes.
 func ExtUnmarshal(data []byte, pak *ExtPacket) error {

@@ -37,6 +37,7 @@ import (
 	"github.com/sfiera/multitalk/internal/dbg"
 	"github.com/sfiera/multitalk/internal/raw"
 	"github.com/sfiera/multitalk/internal/tcp"
+	"github.com/sfiera/multitalk/internal/udp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -111,6 +112,14 @@ func Interfaces() (ifaces []Interface, _ error) {
 
 	for _, dev := range *ether {
 		send, recv, err := raw.EtherTalk(dev)
+		if err != nil {
+			return nil, err
+		}
+		ifaces = append(ifaces, Interface{send, recv})
+	}
+
+	for _, dev := range *multi {
+		send, recv, err := udp.Multicast(dev)
 		if err != nil {
 			return nil, err
 		}
