@@ -96,7 +96,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read snap proto: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, pak.Size-LinkHeaderSize+SNAPProtoSize)
+	pak.Data = make([]byte, pak.Size-LinkHeaderSize-SNAPProtoSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read data: %s", err.Error())
