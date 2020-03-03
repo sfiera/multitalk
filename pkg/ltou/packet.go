@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+
+	"github.com/sfiera/multitalk/pkg/ddp"
 )
 
 const (
@@ -95,4 +97,58 @@ func Marshal(pak Packet) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func Enq(pid uint32, dstNode, srcNode uint8) *Packet {
+	return &Packet{
+		Header: Header{
+			Pid:     pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    LLAPEnq,
+		},
+	}
+}
+
+func Ack(pid uint32, dstNode, srcNode uint8) *Packet {
+	return &Packet{
+		Header: Header{
+			Pid:     pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    LLAPEnq,
+		},
+	}
+}
+
+func AppleTalk(pid uint32, dstNode, srcNode uint8, payload ddp.Packet) (*Packet, error) {
+	data, err := ddp.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
+	}
+	return &Packet{
+		Header: Header{
+			Pid:     pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    LLAPDDP,
+		},
+		Data: data,
+	}, nil
+}
+
+func ExtAppleTalk(pid uint32, dstNode, srcNode uint8, payload ddp.ExtPacket) (*Packet, error) {
+	data, err := ddp.ExtMarshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
+	}
+	return &Packet{
+		Header: Header{
+			Pid:     pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    LLAPDDP,
+		},
+		Data: data,
+	}, nil
 }

@@ -47,7 +47,7 @@ var (
 
 type (
 	bridge struct {
-		pid   int
+		pid   uint32
 		iface *net.Interface
 		eth   ethernet.Addr
 		conn  *net.UDPConn
@@ -68,7 +68,7 @@ func Multicast(iface string) (
 	}
 
 	b := bridge{
-		pid:   os.Getpid(),
+		pid:   uint32(os.Getpid()),
 		iface: i,
 		nodes: map[uint8]bool{},
 	}
@@ -136,20 +136,11 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 	}
 
 	short := ddp.ExtToShort(ext)
-	data, err := ddp.Marshal(short)
+	result, err := ltou.AppleTalk(b.pid, ext.DstNode, ext.SrcNode, short)
 	if err != nil {
 		return nil, nil
 	}
-
-	return &ltou.Packet{
-		Header: ltou.Header{
-			Pid:     uint32(b.pid),
-			DstNode: ext.DstNode,
-			SrcNode: ext.SrcNode,
-			Kind:    ltou.LLAPDDP,
-		},
-		Data: data,
-	}, nil
+	return result, nil
 }
 
 func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
@@ -162,12 +153,14 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 		return nil, nil
 	}
 
-	kind := ltou.LLAPType(0)
 	switch a.Opcode {
 	case aarp.ProbeOp:
-		kind = ltou.LLAPEnq // “Is this AppleTalk node ID in use by anyone?”
+		// “Is this AppleTalk node ID in use by anyone?”
+		return ltou.Enq(b.pid, a.Dst.Proto.Node, a.Src.Proto.Node), nil
+
 	case aarp.ResponseOp:
-		kind = ltou.LLAPAck // “Yes, sorry, I’m already using that node ID.”
+		// “Yes, sorry, I’m already using that node ID.”
+		return ltou.Ack(b.pid, a.Dst.Proto.Node, a.Src.Proto.Node), nil
 
 	case aarp.RequestOp:
 		// Request to map an AppleTalk address to a hardware address (MAC).
@@ -190,15 +183,6 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 	default:
 		return nil, nil
 	}
-
-	return &ltou.Packet{
-		Header: ltou.Header{
-			Pid:     uint32(b.pid),
-			DstNode: a.Dst.Proto.Node,
-			SrcNode: a.Src.Proto.Node,
-			Kind:    kind,
-		},
-	}, nil
 }
 
 func (b *bridge) isProxyForNode(node uint8) bool {
@@ -243,7 +227,7 @@ func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
 }
 
 func (b *bridge) isSender(from *net.UDPAddr, packet ltou.Packet) bool {
-	if packet.Pid != uint32(b.pid) {
+	if packet.Pid != b.pid {
 		return false
 	}
 	addrs, err := b.iface.Addrs()
