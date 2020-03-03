@@ -33,6 +33,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"github.com/sfiera/multitalk/pkg/appletalk"
 )
 
 const (
@@ -45,7 +47,7 @@ const (
 type (
 	Header struct {
 		Size             uint16
-		DstPort, SrcPort uint8
+		DstPort, SrcPort appletalk.Socket
 		Proto            uint8
 	}
 	Packet struct {
@@ -55,9 +57,9 @@ type (
 
 	ExtHeader struct {
 		Size, Cksum      uint16
-		DstNet, SrcNet   uint16
-		DstNode, SrcNode uint8
-		DstPort, SrcPort uint8
+		DstNet, SrcNet   appletalk.Network
+		DstNode, SrcNode appletalk.Node
+		DstPort, SrcPort appletalk.Socket
 		Proto            uint8
 	}
 	ExtPacket struct {
@@ -164,7 +166,7 @@ func ExtToShort(ext ExtPacket) Packet {
 	}
 }
 
-func ShortToExt(pak Packet, network uint16, dstNode, srcNode uint8) ExtPacket {
+func ShortToExt(pak Packet, network appletalk.Network, dstNode, srcNode appletalk.Node) ExtPacket {
 	return ExtPacket{
 		ExtHeader: ExtHeader{
 			Size:    pak.Size - HeaderSize + ExtHeaderSize,

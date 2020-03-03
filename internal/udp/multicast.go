@@ -35,6 +35,7 @@ import (
 	"sync"
 
 	"github.com/sfiera/multitalk/pkg/aarp"
+	"github.com/sfiera/multitalk/pkg/appletalk"
 	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
@@ -42,7 +43,7 @@ import (
 )
 
 var (
-	defaultNet = uint16(0xff00)
+	defaultNet = appletalk.Network(0xff00)
 )
 
 type (
@@ -52,7 +53,7 @@ type (
 		eth   ethernet.Addr
 		conn  *net.UDPConn
 
-		nodes   map[uint8]bool
+		nodes   map[appletalk.Node]bool
 		nodesMu sync.Mutex
 	}
 )
@@ -70,7 +71,7 @@ func Multicast(iface string) (
 	b := bridge{
 		pid:   uint32(os.Getpid()),
 		iface: i,
-		nodes: map[uint8]bool{},
+		nodes: map[appletalk.Node]bool{},
 	}
 	copy(b.eth[:], i.HardwareAddr)
 
@@ -185,13 +186,13 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 	}
 }
 
-func (b *bridge) isProxyForNode(node uint8) bool {
+func (b *bridge) isProxyForNode(node appletalk.Node) bool {
 	b.nodesMu.Lock()
 	defer b.nodesMu.Unlock()
 	return b.nodes[node]
 }
 
-func (b *bridge) markProxyForNode(node uint8) {
+func (b *bridge) markProxyForNode(node appletalk.Node) {
 	b.nodesMu.Lock()
 	defer b.nodesMu.Unlock()
 	b.nodes[node] = true

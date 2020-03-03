@@ -35,6 +35,7 @@ import (
 	"io/ioutil"
 	"net"
 
+	"github.com/sfiera/multitalk/pkg/appletalk"
 	"github.com/sfiera/multitalk/pkg/ddp"
 )
 
@@ -57,7 +58,7 @@ type (
 
 	Header struct {
 		Pid              uint32
-		DstNode, SrcNode uint8
+		DstNode, SrcNode appletalk.Node
 		Kind             LLAPType
 	}
 	Packet struct {
@@ -99,7 +100,7 @@ func Marshal(pak Packet) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func Enq(pid uint32, dstNode, srcNode uint8) *Packet {
+func Enq(pid uint32, dstNode, srcNode appletalk.Node) *Packet {
 	return &Packet{
 		Header: Header{
 			Pid:     pid,
@@ -110,7 +111,7 @@ func Enq(pid uint32, dstNode, srcNode uint8) *Packet {
 	}
 }
 
-func Ack(pid uint32, dstNode, srcNode uint8) *Packet {
+func Ack(pid uint32, dstNode, srcNode appletalk.Node) *Packet {
 	return &Packet{
 		Header: Header{
 			Pid:     pid,
@@ -121,7 +122,7 @@ func Ack(pid uint32, dstNode, srcNode uint8) *Packet {
 	}
 }
 
-func AppleTalk(pid uint32, dstNode, srcNode uint8, payload ddp.Packet) (*Packet, error) {
+func AppleTalk(pid uint32, dstNode, srcNode appletalk.Node, payload ddp.Packet) (*Packet, error) {
 	data, err := ddp.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
@@ -137,7 +138,7 @@ func AppleTalk(pid uint32, dstNode, srcNode uint8, payload ddp.Packet) (*Packet,
 	}, nil
 }
 
-func ExtAppleTalk(pid uint32, dstNode, srcNode uint8, payload ddp.ExtPacket) (*Packet, error) {
+func ExtAppleTalk(pid uint32, dstNode, srcNode appletalk.Node, payload ddp.ExtPacket) (*Packet, error) {
 	data, err := ddp.ExtMarshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
