@@ -135,16 +135,8 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 		return nil, nil
 	}
 
-	reg := ddp.Packet{
-		Header: ddp.Header{
-			Size:    5 + uint16(len(ext.Data)),
-			DstPort: ext.DstPort,
-			SrcPort: ext.SrcPort,
-			Proto:   ext.Proto,
-		},
-		Data: ext.Data,
-	}
-	data, err := ddp.Marshal(reg)
+	short := ddp.ExtToShort(ext)
+	data, err := ddp.Marshal(short)
 	if err != nil {
 		return nil, nil
 	}
@@ -290,20 +282,7 @@ func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 		return nil
 	}
 
-	ext := ddp.ExtPacket{
-		ExtHeader: ddp.ExtHeader{
-			Size:    d.Size + 8,
-			DstNet:  0,
-			DstNode: packet.DstNode,
-			DstPort: d.DstPort,
-			SrcNet:  defaultNet,
-			SrcNode: packet.SrcNode,
-			SrcPort: d.SrcPort,
-			Proto:   d.Proto,
-		},
-		Data: d.Data,
-	}
-
+	ext := ddp.ShortToExt(d, defaultNet, packet.DstNode, packet.SrcNode)
 	out, err := ethertalk.AppleTalk(b.eth, ext)
 	if err != nil {
 		return nil

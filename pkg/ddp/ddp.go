@@ -148,3 +148,31 @@ func ExtMarshal(pak ExtPacket) ([]byte, error) {
 
 	return w.Bytes(), nil
 }
+
+func ExtToShort(ext ExtPacket) Packet {
+	return Packet{
+		Header: Header{
+			Size:    5 + uint16(len(ext.Data)),
+			DstPort: ext.DstPort,
+			SrcPort: ext.SrcPort,
+			Proto:   ext.Proto,
+		},
+		Data: ext.Data,
+	}
+}
+
+func ShortToExt(pak Packet, network uint16, dstNode, srcNode uint8) ExtPacket {
+	return ExtPacket{
+		ExtHeader: ExtHeader{
+			Size:    pak.Size + 8,
+			DstNet:  network,
+			DstNode: dstNode,
+			DstPort: pak.DstPort,
+			SrcNet:  network,
+			SrcNode: srcNode,
+			SrcPort: pak.SrcPort,
+			Proto:   pak.Proto,
+		},
+		Data: pak.Data,
+	}
+}
