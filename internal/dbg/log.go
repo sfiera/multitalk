@@ -114,8 +114,8 @@ func logAppleTalkPacket(packet ethertalk.Packet, components []string) []string {
 	components = append(components, fmt.Sprintf(
 		"ddp [%04x] %d.%d:%d <- %d.%d:%d %02x",
 		d.Cksum,
-		d.DstNet, d.DstNode, d.DstPort,
-		d.SrcNet, d.SrcNode, d.SrcPort,
+		d.DstNet, d.DstNode, d.DstSocket,
+		d.SrcNet, d.SrcNode, d.SrcSocket,
 		d.Proto,
 	))
 	return append(components, fmt.Sprintf("%+v", d.Data))

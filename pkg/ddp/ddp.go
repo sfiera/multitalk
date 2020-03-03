@@ -46,9 +46,9 @@ const (
 
 type (
 	Header struct {
-		Size             uint16
-		DstPort, SrcPort appletalk.Socket
-		Proto            uint8
+		Size                 uint16
+		DstSocket, SrcSocket appletalk.Socket
+		Proto                uint8
 	}
 	Packet struct {
 		Header
@@ -56,11 +56,11 @@ type (
 	}
 
 	ExtHeader struct {
-		Size, Cksum      uint16
-		DstNet, SrcNet   appletalk.Network
-		DstNode, SrcNode appletalk.Node
-		DstPort, SrcPort appletalk.Socket
-		Proto            uint8
+		Size, Cksum          uint16
+		DstNet, SrcNet       appletalk.Network
+		DstNode, SrcNode     appletalk.Node
+		DstSocket, SrcSocket appletalk.Socket
+		Proto                uint8
 	}
 	ExtPacket struct {
 		ExtHeader
@@ -157,10 +157,10 @@ func ExtMarshal(pak ExtPacket) ([]byte, error) {
 func ExtToShort(ext ExtPacket) Packet {
 	return Packet{
 		Header: Header{
-			Size:    ext.Size - ExtHeaderSize + HeaderSize,
-			DstPort: ext.DstPort,
-			SrcPort: ext.SrcPort,
-			Proto:   ext.Proto,
+			Size:      ext.Size - ExtHeaderSize + HeaderSize,
+			DstSocket: ext.DstSocket,
+			SrcSocket: ext.SrcSocket,
+			Proto:     ext.Proto,
 		},
 		Data: ext.Data,
 	}
@@ -169,14 +169,14 @@ func ExtToShort(ext ExtPacket) Packet {
 func ShortToExt(pak Packet, network appletalk.Network, dstNode, srcNode appletalk.Node) ExtPacket {
 	return ExtPacket{
 		ExtHeader: ExtHeader{
-			Size:    pak.Size - HeaderSize + ExtHeaderSize,
-			DstNet:  network,
-			DstNode: dstNode,
-			DstPort: pak.DstPort,
-			SrcNet:  network,
-			SrcNode: srcNode,
-			SrcPort: pak.SrcPort,
-			Proto:   pak.Proto,
+			Size:      pak.Size - HeaderSize + ExtHeaderSize,
+			DstNet:    network,
+			DstNode:   dstNode,
+			DstSocket: pak.DstSocket,
+			SrcNet:    network,
+			SrcNode:   srcNode,
+			SrcSocket: pak.SrcSocket,
+			Proto:     pak.Proto,
 		},
 		Data: pak.Data,
 	}
