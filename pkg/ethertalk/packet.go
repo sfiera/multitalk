@@ -155,8 +155,8 @@ func Equal(a, b *Packet) bool {
 		(bytes.Compare(a.Data, b.Data) == 0))
 }
 
-func AppleTalk(src ethernet.Addr, inner ddp.ExtPacket) (*Packet, error) {
-	data, err := ddp.ExtMarshal(inner)
+func AppleTalk(src ethernet.Addr, payload ddp.ExtPacket) (*Packet, error) {
+	data, err := ddp.ExtMarshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
 	}
@@ -172,8 +172,8 @@ func AppleTalk(src ethernet.Addr, inner ddp.ExtPacket) (*Packet, error) {
 	}, nil
 }
 
-func AARP(src ethernet.Addr, inner aarp.Packet) (*Packet, error) {
-	data, err := aarp.Marshal(inner)
+func AARP(src ethernet.Addr, payload aarp.Packet) (*Packet, error) {
+	data, err := aarp.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal aarp: %s", err.Error())
 	}
