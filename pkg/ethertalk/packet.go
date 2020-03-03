@@ -47,6 +47,12 @@ var (
 	AppleTalkBroadcast = ethernet.Addr{0x09, 0x00, 0x07, 0xff, 0xff, 0xff}
 )
 
+const (
+	EthHeaderSize  = 13
+	LinkHeaderSize = 3
+	SNAPProtoSize  = 5
+)
+
 type (
 	EthHeader struct {
 		Dst, Src ethernet.Addr
@@ -90,7 +96,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read snap proto: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, pak.Size-8) // 8 = size of link header + snap proto
+	pak.Data = make([]byte, pak.Size-LinkHeaderSize+SNAPProtoSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read data: %s", err.Error())
@@ -158,7 +164,7 @@ func AppleTalk(src ethernet.Addr, inner ddp.ExtPacket) (*Packet, error) {
 		EthHeader: EthHeader{
 			Dst:  AppleTalkBroadcast,
 			Src:  src,
-			Size: 8 + uint16(len(data)),
+			Size: LinkHeaderSize + SNAPProtoSize + uint16(len(data)),
 		},
 		LinkHeader: SNAP,
 		SNAPProto:  AppleTalkProto,
@@ -175,7 +181,7 @@ func AARP(src ethernet.Addr, inner aarp.Packet) (*Packet, error) {
 		EthHeader: EthHeader{
 			Dst:  AppleTalkBroadcast,
 			Src:  src,
-			Size: 8 + uint16(len(data)),
+			Size: LinkHeaderSize + SNAPProtoSize + uint16(len(data)),
 		},
 		LinkHeader: SNAP,
 		SNAPProto:  AARPProto,

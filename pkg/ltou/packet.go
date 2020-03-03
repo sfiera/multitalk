@@ -45,7 +45,7 @@ const (
 
 var (
 	MulticastAddr = &net.UDPAddr{
-		IP:   net.ParseIP("239.192.76.84"),
+		IP:   net.IPv4(239, 192, 76, 84),
 		Port: 1954,
 	}
 )

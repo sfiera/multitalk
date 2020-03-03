@@ -37,6 +37,9 @@ import (
 
 const (
 	LengthMask = uint16(0x03ff)
+
+	HeaderSize    = 5
+	ExtHeaderSize = 13
 )
 
 type (
@@ -72,7 +75,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read ddp header: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, (pak.Size&LengthMask)-5) // 5 = size of header
+	pak.Data = make([]byte, (pak.Size&LengthMask)-HeaderSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read ddp: %s", err.Error())
@@ -115,7 +118,7 @@ func ExtUnmarshal(data []byte, pak *ExtPacket) error {
 		return fmt.Errorf("read ddp header: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, (pak.Size&LengthMask)-13) // 13 = size of extended header
+	pak.Data = make([]byte, (pak.Size&LengthMask)-ExtHeaderSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read ddp: %s", err.Error())
@@ -152,7 +155,7 @@ func ExtMarshal(pak ExtPacket) ([]byte, error) {
 func ExtToShort(ext ExtPacket) Packet {
 	return Packet{
 		Header: Header{
-			Size:    5 + uint16(len(ext.Data)),
+			Size:    ext.Size - ExtHeaderSize + HeaderSize,
 			DstPort: ext.DstPort,
 			SrcPort: ext.SrcPort,
 			Proto:   ext.Proto,
@@ -164,7 +167,7 @@ func ExtToShort(ext ExtPacket) Packet {
 func ShortToExt(pak Packet, network uint16, dstNode, srcNode uint8) ExtPacket {
 	return ExtPacket{
 		ExtHeader: ExtHeader{
-			Size:    pak.Size + 8,
+			Size:    pak.Size - HeaderSize + ExtHeaderSize,
 			DstNet:  network,
 			DstNode: dstNode,
 			DstPort: pak.DstPort,
