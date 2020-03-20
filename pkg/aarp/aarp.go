@@ -57,19 +57,14 @@ var (
 )
 
 type (
-	AtalkAddr struct {
-		_       uint8
-		Network ddp.Network
-		Node    ddp.Node
-	}
-
 	Header struct {
 		Hardware, Proto         uint16
 		HardwareSize, ProtoSize uint8
 	}
 	AddrPair struct {
 		Hardware ethernet.Addr
-		Proto    AtalkAddr
+		_        uint8
+		Proto    ddp.Addr
 	}
 	Body struct {
 		Opcode uint16
@@ -118,7 +113,7 @@ func Marshal(pak Packet) ([]byte, error) {
 }
 
 // AARP packet for resolving `query` to a hardware address, from `src`.
-func Request(src AddrPair, query AtalkAddr) Packet {
+func Request(src AddrPair, query ddp.Addr) Packet {
 	return Packet{
 		Header: EthernetLLAPBridging,
 		Body: Body{
@@ -142,7 +137,7 @@ func Response(src, dst AddrPair) Packet {
 }
 
 // AARP packet for checking that `query` is available, from `src`.
-func Probe(src ethernet.Addr, query AtalkAddr) Packet {
+func Probe(src ethernet.Addr, query ddp.Addr) Packet {
 	return Packet{
 		Header: EthernetLLAPBridging,
 		Body: Body{

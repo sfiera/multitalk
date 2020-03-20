@@ -289,7 +289,7 @@ func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.P
 func (b *bridge) udpToProbe(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
 	out, err := ethertalk.AARP(
 		b.eth,
-		aarp.Probe(b.eth, aarp.AtalkAddr{Network: defaultNet, Node: packet.DstNode}),
+		aarp.Probe(b.eth, ddp.Addr{Network: defaultNet, Node: packet.DstNode}),
 	)
 	if err != nil {
 		return nil
@@ -301,11 +301,11 @@ func (b *bridge) udpToAck(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 	out, err := ethertalk.AARP(b.eth, aarp.Response(
 		aarp.AddrPair{
 			Hardware: b.eth,
-			Proto:    aarp.AtalkAddr{Network: defaultNet, Node: packet.SrcNode},
+			Proto:    ddp.Addr{Network: defaultNet, Node: packet.SrcNode},
 		},
 		aarp.AddrPair{
 			Hardware: b.eth,
-			Proto:    aarp.AtalkAddr{Network: defaultNet, Node: packet.DstNode},
+			Proto:    ddp.Addr{Network: defaultNet, Node: packet.DstNode},
 		},
 	))
 	if err != nil {

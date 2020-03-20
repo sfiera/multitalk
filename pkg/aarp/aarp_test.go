@@ -33,6 +33,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethernet"
 )
 
@@ -51,12 +52,12 @@ func TestUnmarshalNoError(t *testing.T) {
 			Body{
 				Opcode: ProbeOp,
 				Src: AddrPair{
-					ethernet.Addr{0x08, 0x00, 0x07, 0xb4, 0xb1, 0xce},
-					AtalkAddr{0, 65280, 95},
+					Hardware: ethernet.Addr{0x08, 0x00, 0x07, 0xb4, 0xb1, 0xce},
+					Proto:    ddp.Addr{Network: 65280, Node: 95},
 				},
 				Dst: AddrPair{
-					ethernet.Addr{},
-					AtalkAddr{0, 65280, 95},
+					Hardware: ethernet.Addr{},
+					Proto:    ddp.Addr{Network: 65280, Node: 95},
 				},
 			},
 		},

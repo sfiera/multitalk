@@ -127,6 +127,6 @@ func ethAddr(addr ethernet.Addr) string {
 	)
 }
 
-func atalkAddr(addr aarp.AtalkAddr) string {
+func atalkAddr(addr ddp.Addr) string {
 	return fmt.Sprintf("%d.%d", addr.Network, addr.Node)
 }

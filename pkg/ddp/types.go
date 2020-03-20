@@ -31,4 +31,9 @@ type (
 	Network uint16
 	Node    uint8
 	Socket  uint8
+
+	Addr struct {
+		Network Network
+		Node    Node
+	}
 )
