@@ -1,5 +1,7 @@
 # Introduction
 
+[![Build Status](https://cloud.drone.io/api/badges/sfiera/multitalk/status.svg)](https://cloud.drone.io/sfiera/multitalk)
+
 MultiTalk is a repeater for different transports for AppleTalk:
 * EtherTalk, spoken by Classic MacOS or netatalk2 machines over Ethernet
 * LocalTalk-over-UDP (LTOU) multicast, spoken by Mini vMac 37+
