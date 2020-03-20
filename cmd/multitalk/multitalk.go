@@ -28,107 +28,12 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/pflag"
 
-	"github.com/sfiera/multitalk/internal/dbg"
-	"github.com/sfiera/multitalk/internal/raw"
-	"github.com/sfiera/multitalk/internal/tcp"
-	"github.com/sfiera/multitalk/internal/udp"
-	"github.com/sfiera/multitalk/pkg/ethertalk"
-)
-
-const (
-	versionString = "multitalk 0.1"
-)
-
-var (
-	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
-	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
-	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
-	debug   = pflag.BoolP("debug", "d", false, "log packets")
-	version = pflag.BoolP("version", "v", false, "Display version & exit")
-)
-
-type (
-	Interface struct {
-		Send chan<- ethertalk.Packet
-		Recv <-chan ethertalk.Packet
-	}
+	"github.com/sfiera/multitalk/internal/cmd"
 )
 
 func main() {
 	pflag.Parse()
-
-	if *version {
-		fmt.Println(versionString)
-		os.Exit(0)
-	}
-
-	ifaces, err := Interfaces()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
-
-	for i, iface := range ifaces {
-		sends := []chan<- ethertalk.Packet{}
-		for j, other := range ifaces {
-			if i != j {
-				sends = append(sends, other.Send)
-			}
-		}
-
-		go func(recv <-chan ethertalk.Packet) {
-			for packet := range recv {
-				for _, send := range sends {
-					send <- packet
-				}
-			}
-		}(iface.Recv)
-	}
-
-	<-make(chan bool)
-}
-
-func Interfaces() (ifaces []Interface, _ error) {
-	niface := len(*server) + len(*ether) + len(*multi)
-	if niface == 0 {
-		return nil, fmt.Errorf("no interfaces specified")
-	} else if (niface == 1) && !*debug {
-		return nil, fmt.Errorf("only one interface specified")
-	}
-
-	for _, s := range *server {
-		send, recv, err := tcp.TCPClient(s)
-		if err != nil {
-			return nil, err
-		}
-		ifaces = append(ifaces, Interface{send, recv})
-	}
-
-	for _, dev := range *ether {
-		send, recv, err := raw.EtherTalk(dev)
-		if err != nil {
-			return nil, err
-		}
-		ifaces = append(ifaces, Interface{send, recv})
-	}
-
-	for _, dev := range *multi {
-		send, recv, err := udp.Multicast(dev)
-		if err != nil {
-			return nil, err
-		}
-		ifaces = append(ifaces, Interface{send, recv})
-	}
-
-	if *debug {
-		send, recv := dbg.Logger()
-		ifaces = append(ifaces, Interface{send, recv})
-	}
-
-	return
+	cmd.Main()
 }
