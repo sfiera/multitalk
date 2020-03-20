@@ -11,7 +11,7 @@ steps:
   - apt-get install -y --no-install-recommends libpcap-dev
 
   - go mod download
-  - go build -o multitalk cmd/multitalk.go
+  - go build cmd/multitalk/multitalk.go
   - go test ./...
 
   - go mod verify
