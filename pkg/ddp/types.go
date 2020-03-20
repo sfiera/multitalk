@@ -1,4 +1,3 @@
-//
 // Copyright (c) 2009-2020 Rob Braun <bbraun@synack.net> and others
 // All rights reserved.
 //
@@ -25,8 +24,8 @@
 // CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
-//
-package appletalk
+
+package ddp
 
 type (
 	Network uint16

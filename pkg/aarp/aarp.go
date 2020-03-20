@@ -33,7 +33,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/sfiera/multitalk/pkg/appletalk"
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethernet"
 )
 
@@ -58,8 +58,8 @@ var (
 type (
 	AtalkAddr struct {
 		_       uint8
-		Network appletalk.Network
-		Node    appletalk.Node
+		Network ddp.Network
+		Node    ddp.Node
 	}
 
 	Header struct {
