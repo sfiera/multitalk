@@ -25,9 +25,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// Logs received packets
 package dbg
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -46,25 +48,34 @@ var (
 	}
 )
 
-func Logger() (
+type bridge struct{}
+
+func Logger() *bridge {
+	return &bridge{}
+}
+
+func (b *bridge) Start(ctx context.Context) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-
-	go func() {
-		for packet := range sendCh {
-			components := []string{
-				fmt.Sprintf("%s <- %s", ethAddr(packet.Dst), ethAddr(packet.Src)),
-			}
-			log.Print(strings.Join(logSnap(packet, components), ": "))
-		}
-	}()
-
-	close(recvCh)
-
+	go b.capture(recvCh)
+	go b.transmit(sendCh)
 	return sendCh, recvCh
+}
+
+func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
+	for packet := range sendCh {
+		components := []string{
+			fmt.Sprintf("%s <- %s", ethAddr(packet.Dst), ethAddr(packet.Src)),
+		}
+		log.Print(strings.Join(logSnap(packet, components), ": "))
+	}
+}
+
+func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+	close(recvCh)
 }
 
 func logSnap(packet ethertalk.Packet, components []string) []string {

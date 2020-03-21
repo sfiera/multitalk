@@ -25,86 +25,106 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// Communicates with EtherTalk devices via libpcap
 package raw
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 
 	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
-type bridge struct {
-	mu    sync.Mutex
-	local []ethertalk.Packet
+type (
+	bridge struct {
+		dev         string
+		mu          sync.Mutex
+		local       []ethertalk.Packet
+		capturer    capturer
+		transmitter transmitter
+	}
+
+	capturer interface {
+		ReadPacketData() ([]byte, gopacket.CaptureInfo, error)
+	}
+
+	transmitter interface {
+		WritePacketData([]byte) error
+	}
+)
+
+func EtherTalk(dev string) (b *bridge, err error) {
+	b = &bridge{dev: dev}
+
+	b.capturer, err = b.setupCapture(dev)
+	if err != nil {
+		return nil, err
+	}
+
+	b.transmitter, err = b.setupTransmit(dev)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
 }
 
-func EtherTalk(dev string) (
+func (b *bridge) Start(ctx context.Context) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
-	_ error,
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-
-	b := bridge{}
-
-	err := b.capture(dev, recvCh)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	err = b.transmit(dev, sendCh)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return sendCh, recvCh, nil
+	go b.capture(recvCh)
+	go b.transmit(sendCh)
+	return sendCh, recvCh
 }
 
-func (b *bridge) capture(dev string, ch chan<- ethertalk.Packet) error {
-	// DebugLog("Using device: %s\n", dev)
-	handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
+func (b *bridge) setupCapture(dev string) (capturer, error) {
+	capturer, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
 	if err != nil {
-		return fmt.Errorf("open dev %s: %s", dev, err.Error())
+		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
 	}
 
 	filter := "atalk or aarp"
-	fp, err := handle.CompileBPFFilter(filter)
+	fp, err := capturer.CompileBPFFilter(filter)
 	if err != nil {
-		return fmt.Errorf("compile filter %s: %s", filter, err.Error())
+		return nil, fmt.Errorf("compile filter %s: %s", filter, err.Error())
 	}
 
-	err = handle.SetBPFInstructionFilter(fp)
+	err = capturer.SetBPFInstructionFilter(fp)
 	if err != nil {
-		return fmt.Errorf("install filter %s: %s", filter, err.Error())
+		return nil, fmt.Errorf("install filter %s: %s", filter, err.Error())
 	}
 
-	go func() {
-		localAddrs := map[ethernet.Addr]bool{}
-		for {
-			data, ci, err := handle.ReadPacketData()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "read packet %s: %s\n", dev, err.Error())
-				os.Exit(5)
-			}
-			if ci.CaptureLength != ci.Length {
-				// DebugLog("truncated packet! %s\n", "");
-			}
-			packet := ethertalk.Packet{}
-			err = ethertalk.Unmarshal(data, &packet)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
-				continue
-			}
-			b.packet_handler(ch, packet, localAddrs)
+	return capturer, nil
+}
+
+func (b *bridge) capture(ch chan<- ethertalk.Packet) {
+	localAddrs := map[ethernet.Addr]bool{}
+	for {
+		data, ci, err := b.capturer.ReadPacketData()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "read packet %s: %s\n", b.dev, err.Error())
+			os.Exit(5)
 		}
-	}()
-	return nil
+		if ci.CaptureLength != ci.Length {
+			// DebugLog("truncated packet! %s\n", "");
+		}
+		packet := ethertalk.Packet{}
+		err = ethertalk.Unmarshal(data, &packet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
+			continue
+		}
+		b.packet_handler(ch, packet, localAddrs)
+	}
 }
 
 func (b *bridge) packet_handler(
@@ -146,33 +166,33 @@ func (b *bridge) packet_handler(
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func (b *bridge) transmit(dev string, ch <-chan ethertalk.Packet) error {
+func (b *bridge) setupTransmit(dev string) (transmitter, error) {
 	// DebugLog("Using device: %s\n", dev);
-	handle, err := pcap.OpenLive(dev, 1, false, 1000)
+	transmitter, err := pcap.OpenLive(dev, 1, false, 1000)
 	if err != nil {
-		return fmt.Errorf("open dev %s: %s", dev, err.Error())
+		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
 	}
+	return transmitter, nil
+}
 
-	go func() {
-		for packet := range ch {
-			// printBuffer(packet)
-			// We now have a frame, time to send it out.
-			b.mu.Lock()
-			b.local = append(b.local, packet)
-			b.mu.Unlock()
+func (b *bridge) transmit(ch <-chan ethertalk.Packet) {
+	for packet := range ch {
+		// printBuffer(packet)
+		// We now have a frame, time to send it out.
+		b.mu.Lock()
+		b.local = append(b.local, packet)
+		b.mu.Unlock()
 
-			bin, err := ethertalk.Marshal(packet)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "localtalk send: %s\n", err.Error())
-				continue
-			}
-			err = handle.WritePacketData(bin)
-			// DebugLog("pcap_sendpacket returned %d\n", pret);
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
-			}
-			// The capture thread will free these
+		bin, err := ethertalk.Marshal(packet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "localtalk send: %s\n", err.Error())
+			continue
 		}
-	}()
-	return nil
+		err = b.transmitter.WritePacketData(bin)
+		// DebugLog("pcap_sendpacket returned %d\n", pret);
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
+		}
+		// The capture thread will free these
+	}
 }

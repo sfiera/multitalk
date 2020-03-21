@@ -25,9 +25,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// Communicates with LocalTalk speakers via UDP multicast
 package udp
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -54,14 +56,10 @@ type bridge struct {
 	nodesMu sync.Mutex
 }
 
-func Multicast(iface string) (
-	send chan<- ethertalk.Packet,
-	recv <-chan ethertalk.Packet,
-	_ error,
-) {
+func Multicast(iface string) (*bridge, error) {
 	i, err := net.InterfaceByName(iface)
 	if err != nil {
-		return nil, nil, fmt.Errorf("interface %s: %s", iface, err.Error())
+		return nil, fmt.Errorf("interface %s: %s", iface, err.Error())
 	}
 
 	b := bridge{
@@ -73,18 +71,23 @@ func Multicast(iface string) (
 
 	b.conn, err = net.ListenMulticastUDP("udp", i, ltou.MulticastAddr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("listen %s: %s", iface, err.Error())
+		return nil, fmt.Errorf("listen %s: %s", iface, err.Error())
 	}
-
-	sendCh := make(chan ethertalk.Packet)
-	recvCh := make(chan ethertalk.Packet)
-
-	go b.recv(sendCh, recvCh)
-	go b.send(recvCh)
-	return sendCh, recvCh, nil
+	return &b, nil
 }
 
-func (b *bridge) recv(sendCh <-chan ethertalk.Packet, recvCh chan<- ethertalk.Packet) {
+func (b *bridge) Start(ctx context.Context) (
+	send chan<- ethertalk.Packet,
+	recv <-chan ethertalk.Packet,
+) {
+	sendCh := make(chan ethertalk.Packet)
+	recvCh := make(chan ethertalk.Packet)
+	go b.capture(recvCh)
+	go b.transmit(sendCh, recvCh)
+	return sendCh, recvCh
+}
+
+func (b *bridge) transmit(sendCh <-chan ethertalk.Packet, recvCh chan<- ethertalk.Packet) {
 	for packet := range sendCh {
 		conv, resp := b.etherTalkToUDP(packet)
 		if resp != nil {
@@ -194,7 +197,7 @@ func (b *bridge) markProxyForNode(node ddp.Node) {
 	b.nodes[node] = true
 }
 
-func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
 	bin := make([]byte, 700)
 	for {
 		n, addr, err := b.conn.ReadFromUDP(bin)

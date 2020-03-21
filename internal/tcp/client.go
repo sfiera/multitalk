@@ -25,9 +25,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// Communicates with TCP servers
 package tcp
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -40,26 +42,26 @@ type bridge struct {
 	conn net.Conn
 }
 
-func TCPClient(server string) (
-	send chan<- ethertalk.Packet,
-	recv <-chan ethertalk.Packet,
-	_ error,
-) {
+func TCPClient(server string) (*bridge, error) {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dial %s: %s", server, err.Error())
+		return nil, fmt.Errorf("dial %s: %s", server, err.Error())
 	}
-
-	sendCh := make(chan ethertalk.Packet)
-	recvCh := make(chan ethertalk.Packet)
-
-	b := bridge{conn}
-	go b.recv(sendCh)
-	go b.send(recvCh)
-	return sendCh, recvCh, nil
+	return &bridge{conn}, nil
 }
 
-func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
+func (b *bridge) Start(ctx context.Context) (
+	send chan<- ethertalk.Packet,
+	recv <-chan ethertalk.Packet,
+) {
+	sendCh := make(chan ethertalk.Packet)
+	recvCh := make(chan ethertalk.Packet)
+	go b.capture(recvCh)
+	go b.transmit(sendCh)
+	return sendCh, recvCh
+}
+
+func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		bin, err := ethertalk.Marshal(packet)
 		if err != nil {
@@ -71,7 +73,7 @@ func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
 	}
 }
 
-func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
 	for {
 		// receive a frame and send it out on the net
 		length := uint32(0)

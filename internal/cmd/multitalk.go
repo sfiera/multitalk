@@ -25,9 +25,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
+// multitalk binary implementation
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -53,9 +55,16 @@ var (
 )
 
 type (
-	Interface struct {
+	iface struct {
 		Send chan<- ethertalk.Packet
 		Recv <-chan ethertalk.Packet
+	}
+
+	bridge interface {
+		Start(ctx context.Context) (
+			send chan<- ethertalk.Packet,
+			recv <-chan ethertalk.Packet,
+		)
 	}
 )
 
@@ -91,7 +100,9 @@ func Main() {
 	<-make(chan bool)
 }
 
-func Interfaces() (ifaces []Interface, _ error) {
+func Interfaces() (ifaces []iface, _ error) {
+	ctx := context.Background()
+
 	niface := len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
@@ -99,33 +110,39 @@ func Interfaces() (ifaces []Interface, _ error) {
 		return nil, fmt.Errorf("only one interface specified")
 	}
 
+	bridges := []bridge{}
+
 	for _, s := range *server {
-		send, recv, err := tcp.TCPClient(s)
+		tcp, err := tcp.TCPClient(s)
 		if err != nil {
 			return nil, err
 		}
-		ifaces = append(ifaces, Interface{send, recv})
+		bridges = append(bridges, tcp)
 	}
 
 	for _, dev := range *ether {
-		send, recv, err := raw.EtherTalk(dev)
+		et, err := raw.EtherTalk(dev)
 		if err != nil {
 			return nil, err
 		}
-		ifaces = append(ifaces, Interface{send, recv})
+		bridges = append(bridges, et)
 	}
 
 	for _, dev := range *multi {
-		send, recv, err := udp.Multicast(dev)
+		udp, err := udp.Multicast(dev)
 		if err != nil {
 			return nil, err
 		}
-		ifaces = append(ifaces, Interface{send, recv})
+		bridges = append(bridges, udp)
 	}
 
 	if *debug {
-		send, recv := dbg.Logger()
-		ifaces = append(ifaces, Interface{send, recv})
+		bridges = append(bridges, dbg.Logger())
+	}
+
+	for _, b := range bridges {
+		send, recv := b.Start(ctx)
+		ifaces = append(ifaces, iface{send, recv})
 	}
 
 	return
