@@ -25,34 +25,36 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// Encodes and decodes LToU (LocalTalk-over-UDP) packets.
-package ltou
+// Encodes and decodes LLAP (LocalTalk Link Access Protocol) packets
+package llap
 
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
-	"net"
 
 	"github.com/sfiera/multitalk/pkg/ddp"
-	"github.com/sfiera/multitalk/pkg/llap"
 )
 
-// Default destination for LToU packets.
-var MulticastAddr = &net.UDPAddr{
-	IP:   net.IPv4(239, 192, 76, 84),
-	Port: 1954,
-}
+const (
+	TypeDDP    = Type(0x01)
+	TypeExtDDP = Type(0x02)
+	TypeEnq    = Type(0x81)
+	TypeAck    = Type(0x82)
+)
 
 type (
+	Type uint8
+
 	Header struct {
-		Pid uint32 // LToU-specific
+		DstNode, SrcNode ddp.Node
+		Kind             Type
 	}
 
 	Packet struct {
 		Header
-		LLAP llap.Packet
+		Payload []byte
 	}
 )
 
@@ -63,15 +65,11 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read udp header: %s", err.Error())
 	}
 
-	payload, err := ioutil.ReadAll(r)
+	pak.Payload, err = ioutil.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("read udp body: %s", err.Error())
 	}
 
-	err = llap.Unmarshal(payload, &pak.LLAP)
-	if err != nil {
-		return fmt.Errorf("read udp body: %s", err.Error())
-	}
 	return nil
 }
 
@@ -83,61 +81,62 @@ func Marshal(pak Packet) ([]byte, error) {
 		return nil, fmt.Errorf("write udp header: %s", err.Error())
 	}
 
-	payload, err := llap.Marshal(pak.LLAP)
+	n, err := buf.Write(pak.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("write udp body: %s", err.Error())
-	}
-
-	n, err := buf.Write(payload)
-	if err != nil {
-		return nil, fmt.Errorf("write udp body: %s", err.Error())
-	} else if n < len(payload) {
-		return nil, fmt.Errorf("write udp body: incomplete write (%d < %d)", n, len(payload))
+	} else if n < len(pak.Payload) {
+		return nil, fmt.Errorf("write udp body: incomplete write (%d < %d)", n, len(pak.Payload))
 	}
 
 	return buf.Bytes(), nil
 }
 
-func Enq(pid uint32, dstNode, srcNode ddp.Node) *Packet {
+func Enq(dstNode, srcNode ddp.Node) *Packet {
 	return &Packet{
 		Header: Header{
-			Pid: pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    TypeEnq,
 		},
-		LLAP: *llap.Enq(dstNode, srcNode),
 	}
 }
 
-func Ack(pid uint32, dstNode, srcNode ddp.Node) *Packet {
+func Ack(dstNode, srcNode ddp.Node) *Packet {
 	return &Packet{
 		Header: Header{
-			Pid: pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    TypeAck,
 		},
-		LLAP: *llap.Ack(dstNode, srcNode),
 	}
 }
 
-func AppleTalk(pid uint32, dstNode, srcNode ddp.Node, payload ddp.Packet) (*Packet, error) {
-	data, err := llap.AppleTalk(dstNode, srcNode, payload)
+func AppleTalk(dstNode, srcNode ddp.Node, payload ddp.Packet) (*Packet, error) {
+	data, err := ddp.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal llap: %s", err.Error())
+		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
 	}
 	return &Packet{
 		Header: Header{
-			Pid: pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    TypeDDP,
 		},
-		LLAP: *data,
+		Payload: data,
 	}, nil
 }
 
-func ExtAppleTalk(pid uint32, dstNode, srcNode ddp.Node, payload ddp.ExtPacket) (*Packet, error) {
-	data, err := llap.ExtAppleTalk(dstNode, srcNode, payload)
+func ExtAppleTalk(dstNode, srcNode ddp.Node, payload ddp.ExtPacket) (*Packet, error) {
+	data, err := ddp.ExtMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal llap: %s", err.Error())
+		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
 	}
 	return &Packet{
 		Header: Header{
-			Pid: pid,
+			DstNode: dstNode,
+			SrcNode: srcNode,
+			Kind:    TypeDDP,
 		},
-		LLAP: *data,
+		Payload: data,
 	}, nil
 }
