@@ -39,38 +39,46 @@ import (
 )
 
 const (
-	Ethernet     = uint16(0x0001)
-	LLAPBridging = uint16(0x809b)
-
-	RequestOp  = uint16(0x01)
-	ResponseOp = uint16(0x02)
-	ProbeOp    = uint16(0x03)
+	HardwareEthernet  = Hardware(0x0001)
+	ProtoLLAPBridging = Proto(0x809b)
 )
 
-var (
-	EthernetLLAPBridging = Header{
-		Hardware:     Ethernet,
-		Proto:        LLAPBridging,
-		HardwareSize: 6,
-		ProtoSize:    4,
-	}
+var EthernetLLAPBridging = Header{
+	Hardware:     HardwareEthernet,
+	Proto:        ProtoLLAPBridging,
+	HardwareSize: 6,
+	ProtoSize:    4,
+}
+
+type Opcode uint16
+
+const (
+	RequestOp  = Opcode(0x01)
+	ResponseOp = Opcode(0x02)
+	ProbeOp    = Opcode(0x03)
 )
 
 type (
-	Header struct {
-		Hardware, Proto         uint16
+	Hardware uint16
+	Proto    uint16
+	Header   struct {
+		Hardware                Hardware
+		Proto                   Proto
 		HardwareSize, ProtoSize uint8
 	}
+
 	AddrPair struct {
 		Hardware ethernet.Addr
 		_        uint8
 		Proto    ddp.Addr
 	}
+
 	Body struct {
-		Opcode uint16
+		Opcode Opcode
 		Src    AddrPair
 		Dst    AddrPair
 	}
+
 	Packet struct {
 		Header
 		Body
@@ -124,7 +132,7 @@ func Request(src AddrPair, query ddp.Addr) Packet {
 	}
 }
 
-// AARP packet responding to a request or probe `dst` from `src.
+// AARP packet responding to a request or probe `dst` from `src`.
 func Response(src, dst AddrPair) Packet {
 	return Packet{
 		Header: EthernetLLAPBridging,

@@ -36,6 +36,10 @@ import (
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
+type bridge struct {
+	conn net.Conn
+}
+
 func TCPClient(server string) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
@@ -49,63 +53,66 @@ func TCPClient(server string) (
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
 
-	go func() {
-		for packet := range sendCh {
-			bin, err := ethertalk.Marshal(packet)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
-				continue
-			}
-			_ = binary.Write(conn, binary.BigEndian, len(bin))
-			_, _ = conn.Write(bin)
-		}
-	}()
-
-	go func() {
-		for {
-			// receive a frame and send it out on the net
-			length := uint32(0)
-			err := binary.Read(conn, binary.BigEndian, &length)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
-				os.Exit(1)
-			}
-
-			if length > 4096 {
-				fmt.Fprintf(os.Stderr, "Received length is invalid: %d vs %d\n", length, length)
-				continue
-			}
-			// DebugLog("receiving packet of length: %u\n", length);
-
-			data := make([]byte, length)
-			_, err = conn.Read(data)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
-				os.Exit(1)
-			}
-			// DebugLog("Successfully received packet\n%s", "");
-
-			packet := ethertalk.Packet{}
-			err = ethertalk.Unmarshal(data, &packet)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
-				continue
-			}
-
-			// Verify this is actually an AppleTalk related frame we've
-			// received, in a vague attempt at not polluting the network
-			// with unintended frames.
-			// DebugLog("ethertalk.Packet frame type: %x\n", type);
-			if !((packet.SNAPProto == ethertalk.AARPProto) ||
-				(packet.SNAPProto == ethertalk.AppleTalkProto)) {
-				// Not an appletalk or aarp frame, drop it.
-				// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", packet.Proto);
-				continue
-			}
-
-			recvCh <- packet
-		}
-	}()
-
+	b := bridge{conn}
+	go b.recv(sendCh)
+	go b.send(recvCh)
 	return sendCh, recvCh, nil
+}
+
+func (b *bridge) recv(sendCh <-chan ethertalk.Packet) {
+	for packet := range sendCh {
+		bin, err := ethertalk.Marshal(packet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
+			continue
+		}
+		_ = binary.Write(b.conn, binary.BigEndian, len(bin))
+		_, _ = b.conn.Write(bin)
+	}
+}
+
+func (b *bridge) send(recvCh chan<- ethertalk.Packet) {
+	for {
+		// receive a frame and send it out on the net
+		length := uint32(0)
+		err := binary.Read(b.conn, binary.BigEndian, &length)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+			os.Exit(1)
+		}
+
+		if length > 4096 {
+			fmt.Fprintf(os.Stderr, "Received length is invalid: %d vs %d\n", length, length)
+			continue
+		}
+		// DebugLog("receiving packet of length: %u\n", length);
+
+		data := make([]byte, length)
+		_, err = b.conn.Read(data)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+			os.Exit(1)
+		}
+		// DebugLog("Successfully received packet\n%s", "");
+
+		packet := ethertalk.Packet{}
+		err = ethertalk.Unmarshal(data, &packet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+			continue
+		}
+
+		// Verify this is actually an AppleTalk related frame we've
+		// received, in a vague attempt at not polluting the network
+		// with unintended frames.
+		// DebugLog("ethertalk.Packet frame type: %x\n", type);
+		if !((packet.SNAPProto == ethertalk.AARPProto) ||
+			(packet.SNAPProto == ethertalk.AppleTalkProto)) {
+			// Not an appletalk or aarp frame, drop it.
+			// DebugLog("Not an AppleTalk or AARP frame, dropping: %d\n", packet.Proto);
+			continue
+		}
+
+		recvCh <- packet
+	}
 }

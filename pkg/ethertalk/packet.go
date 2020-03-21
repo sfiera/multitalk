@@ -58,20 +58,33 @@ type (
 		Dst, Src ethernet.Addr
 		Size     uint16
 	}
+
 	LinkHeader struct {
 		DSAP, SSAP byte
 		Control    byte
 	}
+
 	SNAPProto struct {
 		OUI   [3]byte
 		Proto uint16
 	}
+
+	// Combines all data in an EtherTalk packet.
+	//
+	// EtherTalk packets contain:
+	//   * an Ethernet header,
+	//   * an LLC (Logical Link Control) header, which must equal the
+	//     SNAP (Subnetwork Access Protocol) LinkHeader value,
+	//   * the SNAP data, indicating either an AppleTalk (DDP) or AARP
+	//     payload,
+	//   * the DDP or AARP payload itself, and
+	//   * optionally, extra padding as specified by the Ethernet header.
 	Packet struct {
 		EthHeader
-		LinkHeader
-		SNAPProto
-		Data []byte
-		Pad  []byte
+		LinkHeader        // always equals SNAP in EtherTalk
+		SNAPProto         // always AppleTalkProto or AARPProto in EtherTalk
+		Payload    []byte // marshaled ddp.Packet or aarp.Packet
+		Pad        []byte
 	}
 )
 
@@ -96,12 +109,12 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read snap proto: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, pak.Size-LinkHeaderSize-SNAPProtoSize)
-	n, err := r.Read(pak.Data)
+	pak.Payload = make([]byte, pak.Size-LinkHeaderSize-SNAPProtoSize)
+	n, err := r.Read(pak.Payload)
 	if err != nil {
 		return fmt.Errorf("read data: %s", err.Error())
-	} else if n < len(pak.Data) {
-		return fmt.Errorf("read data: incomplete data (%d < %d)", n, len(pak.Data))
+	} else if n < len(pak.Payload) {
+		return fmt.Errorf("read data: incomplete data (%d < %d)", n, len(pak.Payload))
 	}
 
 	pak.Pad, err = ioutil.ReadAll(r)
@@ -130,11 +143,11 @@ func Marshal(pak Packet) ([]byte, error) {
 		return nil, fmt.Errorf("write snap proto: %s", err.Error())
 	}
 
-	n, err := w.Write(pak.Data)
+	n, err := w.Write(pak.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("write data: %s", err.Error())
-	} else if n < len(pak.Data) {
-		return nil, fmt.Errorf("write data: incomplete data (%d < %d)", n, len(pak.Data))
+	} else if n < len(pak.Payload) {
+		return nil, fmt.Errorf("write data: incomplete data (%d < %d)", n, len(pak.Payload))
 	}
 
 	n, err = w.Write(pak.Pad)
@@ -152,7 +165,7 @@ func Equal(a, b *Packet) bool {
 	return ((a.EthHeader == b.EthHeader) &&
 		(a.LinkHeader == b.LinkHeader) &&
 		(a.SNAPProto == b.SNAPProto) &&
-		(bytes.Compare(a.Data, b.Data) == 0))
+		(bytes.Compare(a.Payload, b.Payload) == 0))
 }
 
 func AppleTalk(src ethernet.Addr, payload ddp.ExtPacket) (*Packet, error) {
@@ -168,7 +181,7 @@ func AppleTalk(src ethernet.Addr, payload ddp.ExtPacket) (*Packet, error) {
 		},
 		LinkHeader: SNAP,
 		SNAPProto:  AppleTalkProto,
-		Data:       data,
+		Payload:    data,
 	}, nil
 }
 
@@ -185,6 +198,6 @@ func AARP(src ethernet.Addr, payload aarp.Packet) (*Packet, error) {
 		},
 		LinkHeader: SNAP,
 		SNAPProto:  AARPProto,
-		Data:       data,
+		Payload:    data,
 	}, nil
 }

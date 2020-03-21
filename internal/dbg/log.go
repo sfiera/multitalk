@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	llapOps = map[uint16]string{
+	llapOps = map[aarp.Opcode]string{
 		aarp.RequestOp:  "request",
 		aarp.ResponseOp: "response",
 		aarp.ProbeOp:    "probe",
@@ -86,7 +86,7 @@ func logSnap(packet ethertalk.Packet, components []string) []string {
 func logAARPPacket(packet ethertalk.Packet, components []string) []string {
 	components = append(components, "aarp")
 	a := aarp.Packet{}
-	err := aarp.Unmarshal(packet.Data, &a)
+	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
 		return append(components, "????")
 	}
@@ -105,7 +105,7 @@ func logAARPPacket(packet ethertalk.Packet, components []string) []string {
 func logAppleTalkPacket(packet ethertalk.Packet, components []string) []string {
 	components = append(components, "atlk")
 	d := ddp.ExtPacket{}
-	err := ddp.ExtUnmarshal(packet.Data, &d)
+	err := ddp.ExtUnmarshal(packet.Payload, &d)
 	if err != nil {
 		return append(components, "????")
 	}

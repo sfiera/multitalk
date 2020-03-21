@@ -28,11 +28,18 @@
 package ddp
 
 import (
+	"encoding/binary"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestSizes(t *testing.T) {
+	assert := assert.New(t)
+	assert.Equal(binary.Size(Header{}), headerSize)
+	assert.Equal(binary.Size(ExtHeader{}), extHeaderSize)
+}
 
 func TestExtUnmarshalNoError(t *testing.T) {
 	cases := []struct {

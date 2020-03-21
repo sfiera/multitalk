@@ -44,17 +44,15 @@ var (
 	defaultNet = ddp.Network(0xff00)
 )
 
-type (
-	bridge struct {
-		pid   uint32
-		iface *net.Interface
-		eth   ethernet.Addr
-		conn  *net.UDPConn
+type bridge struct {
+	pid   uint32
+	iface *net.Interface
+	eth   ethernet.Addr
+	conn  *net.UDPConn
 
-		nodes   map[ddp.Node]bool
-		nodesMu sync.Mutex
-	}
-)
+	nodes   map[ddp.Node]bool
+	nodesMu sync.Mutex
+}
 
 func Multicast(iface string) (
 	send chan<- ethertalk.Packet,
@@ -129,7 +127,7 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 	response *ethertalk.Packet,
 ) {
 	ext := ddp.ExtPacket{}
-	err := ddp.ExtUnmarshal(packet.Data, &ext)
+	err := ddp.ExtUnmarshal(packet.Payload, &ext)
 	if err != nil {
 		return nil, nil
 	}
@@ -147,7 +145,7 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 	response *ethertalk.Packet,
 ) {
 	a := aarp.Packet{}
-	err := aarp.Unmarshal(packet.Data, &a)
+	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
 		return nil, nil
 	}
@@ -260,7 +258,7 @@ func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet ltou.Packet) *ethertal
 
 func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
 	d := ddp.Packet{}
-	err := ddp.Unmarshal(packet.Data, &d)
+	err := ddp.Unmarshal(packet.Payload, &d)
 	if err != nil {
 		return nil
 	}
@@ -275,7 +273,7 @@ func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 
 func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
 	d := ddp.ExtPacket{}
-	err := ddp.ExtUnmarshal(packet.Data, &d)
+	err := ddp.ExtUnmarshal(packet.Payload, &d)
 	if err != nil {
 		return nil
 	}

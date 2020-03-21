@@ -38,20 +38,27 @@ import (
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
+type bridge struct {
+	mu    sync.Mutex
+	local []ethertalk.Packet
+}
+
 func EtherTalk(dev string) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 	_ error,
 ) {
-	localPacketMu := sync.Mutex{}
-	localPackets := []ethertalk.Packet{}
+	sendCh := make(chan ethertalk.Packet)
+	recvCh := make(chan ethertalk.Packet)
 
-	recvCh, err := capture(dev, &localPacketMu, &localPackets)
+	b := bridge{}
+
+	err := b.capture(dev, recvCh)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sendCh, err := transmit(dev, &localPacketMu, &localPackets)
+	err = b.transmit(dev, sendCh)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,27 +66,25 @@ func EtherTalk(dev string) (
 	return sendCh, recvCh, nil
 }
 
-func capture(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (<-chan ethertalk.Packet, error) {
-	ch := make(chan ethertalk.Packet)
-
+func (b *bridge) capture(dev string, ch chan<- ethertalk.Packet) error {
 	// DebugLog("Using device: %s\n", dev)
 	handle, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
 	if err != nil {
-		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
+		return fmt.Errorf("open dev %s: %s", dev, err.Error())
 	}
 
 	filter := "atalk or aarp"
 	fp, err := handle.CompileBPFFilter(filter)
 	if err != nil {
-		return nil, fmt.Errorf("compile filter %s: %s", filter, err.Error())
+		return fmt.Errorf("compile filter %s: %s", filter, err.Error())
 	}
 
 	err = handle.SetBPFInstructionFilter(fp)
 	if err != nil {
-		return nil, fmt.Errorf("install filter %s: %s", filter, err.Error())
+		return fmt.Errorf("install filter %s: %s", filter, err.Error())
 	}
 
-	go func(send chan<- ethertalk.Packet) {
+	go func() {
 		localAddrs := map[ethernet.Addr]bool{}
 		for {
 			data, ci, err := handle.ReadPacketData()
@@ -96,35 +101,33 @@ func capture(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (<-ch
 				fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
 				continue
 			}
-			packet_handler(send, packet, localAddrs, mu, localPackets)
+			b.packet_handler(ch, packet, localAddrs)
 		}
-	}(ch)
-	return ch, nil
+	}()
+	return nil
 }
 
-func packet_handler(
+func (b *bridge) packet_handler(
 	send chan<- ethertalk.Packet,
 	packet ethertalk.Packet,
 	localAddrs map[ethernet.Addr]bool,
-	mu *sync.Mutex,
-	localPackets *[]ethertalk.Packet,
 ) {
 	// DebugLog("packet_handler entered%s", "\n")
 
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
-	mu.Lock()
-	for i, np := range *localPackets {
+	b.mu.Lock()
+	for i, np := range b.local {
 		if ethertalk.Equal(&np, &packet) {
-			last := len(*localPackets) - 1
-			(*localPackets)[i] = (*localPackets)[last]
-			*localPackets = (*localPackets)[:last]
-			mu.Unlock()
+			last := len(b.local) - 1
+			b.local[i] = b.local[last]
+			b.local = b.local[:last]
+			b.mu.Unlock()
 			// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
 			return
 		}
 	}
-	mu.Unlock()
+	b.mu.Unlock()
 
 	// Check to see if the destination address matches any addresses
 	// in the list of source addresses we've seen on our network.
@@ -143,22 +146,20 @@ func packet_handler(
 	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
-func transmit(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (chan<- ethertalk.Packet, error) {
-	ch := make(chan ethertalk.Packet)
-
+func (b *bridge) transmit(dev string, ch <-chan ethertalk.Packet) error {
 	// DebugLog("Using device: %s\n", dev);
 	handle, err := pcap.OpenLive(dev, 1, false, 1000)
 	if err != nil {
-		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
+		return fmt.Errorf("open dev %s: %s", dev, err.Error())
 	}
 
-	go func(recv <-chan ethertalk.Packet) {
-		for packet := range recv {
+	go func() {
+		for packet := range ch {
 			// printBuffer(packet)
 			// We now have a frame, time to send it out.
-			mu.Lock()
-			*localPackets = append(*localPackets, packet)
-			mu.Unlock()
+			b.mu.Lock()
+			b.local = append(b.local, packet)
+			b.mu.Unlock()
 
 			bin, err := ethertalk.Marshal(packet)
 			if err != nil {
@@ -172,6 +173,6 @@ func transmit(dev string, mu *sync.Mutex, localPackets *[]ethertalk.Packet) (cha
 			}
 			// The capture thread will free these
 		}
-	}(ch)
-	return ch, nil
+	}()
+	return nil
 }

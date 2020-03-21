@@ -36,10 +36,10 @@ import (
 )
 
 const (
-	LengthMask = uint16(0x03ff)
+	lengthMask = uint16(0x03ff)
 
-	HeaderSize    = 5
-	ExtHeaderSize = 13
+	headerSize    = 5
+	extHeaderSize = 13
 )
 
 type (
@@ -48,6 +48,7 @@ type (
 		DstSocket, SrcSocket Socket
 		Proto                uint8
 	}
+
 	Packet struct {
 		Header
 		Data []byte
@@ -60,6 +61,7 @@ type (
 		DstSocket, SrcSocket Socket
 		Proto                uint8
 	}
+
 	ExtPacket struct {
 		ExtHeader
 		Data []byte
@@ -75,7 +77,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read ddp header: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, (pak.Size&LengthMask)-HeaderSize)
+	pak.Data = make([]byte, (pak.Size&lengthMask)-headerSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read ddp: %s", err.Error())
@@ -118,7 +120,7 @@ func ExtUnmarshal(data []byte, pak *ExtPacket) error {
 		return fmt.Errorf("read ddp header: %s", err.Error())
 	}
 
-	pak.Data = make([]byte, (pak.Size&LengthMask)-ExtHeaderSize)
+	pak.Data = make([]byte, (pak.Size&lengthMask)-extHeaderSize)
 	n, err := r.Read(pak.Data)
 	if err != nil {
 		return fmt.Errorf("read ddp: %s", err.Error())
@@ -152,10 +154,13 @@ func ExtMarshal(pak ExtPacket) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
+// Converts an extended packet to a short-form packet.
+//
+// Discards the network and node information.
 func ExtToShort(ext ExtPacket) Packet {
 	return Packet{
 		Header: Header{
-			Size:      ext.Size - ExtHeaderSize + HeaderSize,
+			Size:      ext.Size - extHeaderSize + headerSize,
 			DstSocket: ext.DstSocket,
 			SrcSocket: ext.SrcSocket,
 			Proto:     ext.Proto,
@@ -164,10 +169,11 @@ func ExtToShort(ext ExtPacket) Packet {
 	}
 }
 
+// Converts a short-form packet to an extended packet.
 func ShortToExt(pak Packet, network Network, dstNode, srcNode Node) ExtPacket {
 	return ExtPacket{
 		ExtHeader: ExtHeader{
-			Size:      pak.Size - HeaderSize + ExtHeaderSize,
+			Size:      pak.Size - headerSize + extHeaderSize,
 			DstNet:    network,
 			DstNode:   dstNode,
 			DstSocket: pak.DstSocket,

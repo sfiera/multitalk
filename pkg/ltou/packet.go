@@ -45,24 +45,24 @@ const (
 	LLAPAck    = LLAPType(0x82)
 )
 
-var (
-	MulticastAddr = &net.UDPAddr{
-		IP:   net.IPv4(239, 192, 76, 84),
-		Port: 1954,
-	}
-)
+// Default destination for LToU packets.
+var MulticastAddr = &net.UDPAddr{
+	IP:   net.IPv4(239, 192, 76, 84),
+	Port: 1954,
+}
 
 type (
 	LLAPType uint8
 
 	Header struct {
-		Pid              uint32
-		DstNode, SrcNode ddp.Node
-		Kind             LLAPType
+		Pid              uint32   // LToU-specific
+		DstNode, SrcNode ddp.Node // General LocalTalk
+		Kind             LLAPType // General LocalTalk
 	}
+
 	Packet struct {
 		Header
-		Data []byte
+		Payload []byte
 	}
 )
 
@@ -73,7 +73,7 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read udp header: %s", err.Error())
 	}
 
-	pak.Data, err = ioutil.ReadAll(r)
+	pak.Payload, err = ioutil.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("read udp body: %s", err.Error())
 	}
@@ -89,11 +89,11 @@ func Marshal(pak Packet) ([]byte, error) {
 		return nil, fmt.Errorf("write udp header: %s", err.Error())
 	}
 
-	n, err := buf.Write(pak.Data)
+	n, err := buf.Write(pak.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("write udp body: %s", err.Error())
-	} else if n < len(pak.Data) {
-		return nil, fmt.Errorf("write udp body: incomplete write (%d < %d)", n, len(pak.Data))
+	} else if n < len(pak.Payload) {
+		return nil, fmt.Errorf("write udp body: incomplete write (%d < %d)", n, len(pak.Payload))
 	}
 
 	return buf.Bytes(), nil
@@ -133,7 +133,7 @@ func AppleTalk(pid uint32, dstNode, srcNode ddp.Node, payload ddp.Packet) (*Pack
 			SrcNode: srcNode,
 			Kind:    LLAPDDP,
 		},
-		Data: data,
+		Payload: data,
 	}, nil
 }
 
@@ -149,6 +149,6 @@ func ExtAppleTalk(pid uint32, dstNode, srcNode ddp.Node, payload ddp.ExtPacket) 
 			SrcNode: srcNode,
 			Kind:    LLAPDDP,
 		},
-		Data: data,
+		Payload: data,
 	}, nil
 }

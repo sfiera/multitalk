@@ -54,7 +54,7 @@ func TestUnmarshalNoError(t *testing.T) {
 			},
 			LinkHeader: SNAP,
 			SNAPProto:  AARPProto,
-			Data:       unhex("0001809b06040003080007b4b1ce00ff005f00000000000000ff005f"),
+			Payload:    unhex("0001809b06040003080007b4b1ce00ff005f00000000000000ff005f"),
 			Pad:        unhex("080007b4b1ce080007b4"),
 		},
 	}, {
@@ -71,7 +71,7 @@ func TestUnmarshalNoError(t *testing.T) {
 			},
 			LinkHeader: SNAP,
 			SNAPProto:  AppleTalkProto,
-			Data:       unhex("001500000000ff00ff5f060606050000000000012a"),
+			Payload:    unhex("001500000000ff00ff5f060606050000000000012a"),
 			Pad:        unhex("080007b4b1ce080007b4b1ce809b417070"),
 		},
 	}, {
@@ -87,7 +87,7 @@ func TestUnmarshalNoError(t *testing.T) {
 			},
 			LinkHeader: SNAP,
 			SNAPProto:  AppleTalkProto,
-			Data:       unhex("002600000000ff00ff5f02fd022101ff005ffd00034661620b576f726b73746174696f6e012a"),
+			Payload:    unhex("002600000000ff00ff5f02fd022101ff005ffd00034661620b576f726b73746174696f6e012a"),
 			Pad:        unhex(""),
 		},
 	}}
