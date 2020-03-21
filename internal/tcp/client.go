@@ -56,7 +56,7 @@ func (b *bridge) Start(ctx context.Context) (
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(recvCh)
+	go b.capture(ctx, recvCh)
 	go b.transmit(sendCh)
 	return sendCh, recvCh
 }
@@ -73,7 +73,13 @@ func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 	}
 }
 
-func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+	go func() {
+		<-ctx.Done()
+		b.conn.Close()
+	}()
+	defer close(recvCh)
+
 	for {
 		// receive a frame and send it out on the net
 		length := uint32(0)

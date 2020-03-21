@@ -74,16 +74,25 @@ func Main() {
 		os.Exit(0)
 	}
 
-	ifaces, err := Interfaces()
+	bridges, err := Bridges()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
+	Run(context.Background(), bridges)
+}
 
-	for i, iface := range ifaces {
+func Run(ctx context.Context, bridges []bridge) {
+	ifaces := []iface{}
+	for _, b := range bridges {
+		send, recv := b.Start(ctx)
+		ifaces = append(ifaces, iface{send, recv})
+	}
+
+	for _, iface := range ifaces {
 		sends := []chan<- ethertalk.Packet{}
-		for j, other := range ifaces {
-			if i != j {
+		for _, other := range ifaces {
+			if iface.Send != other.Send {
 				sends = append(sends, other.Send)
 			}
 		}
@@ -97,20 +106,16 @@ func Main() {
 		}(iface.Recv)
 	}
 
-	<-make(chan bool)
+	<-ctx.Done()
 }
 
-func Interfaces() (ifaces []iface, _ error) {
-	ctx := context.Background()
-
+func Bridges() (bridges []bridge, _ error) {
 	niface := len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
 	} else if (niface == 1) && !*debug {
 		return nil, fmt.Errorf("only one interface specified")
 	}
-
-	bridges := []bridge{}
 
 	for _, s := range *server {
 		tcp, err := tcp.TCPClient(s)
@@ -139,11 +144,5 @@ func Interfaces() (ifaces []iface, _ error) {
 	if *debug {
 		bridges = append(bridges, dbg.Logger())
 	}
-
-	for _, b := range bridges {
-		send, recv := b.Start(ctx)
-		ifaces = append(ifaces, iface{send, recv})
-	}
-
 	return
 }

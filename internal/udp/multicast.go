@@ -82,12 +82,15 @@ func (b *bridge) Start(ctx context.Context) (
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(recvCh)
+	go b.capture(ctx, recvCh)
 	go b.transmit(sendCh, recvCh)
 	return sendCh, recvCh
 }
 
-func (b *bridge) transmit(sendCh <-chan ethertalk.Packet, recvCh chan<- ethertalk.Packet) {
+func (b *bridge) transmit(
+	sendCh <-chan ethertalk.Packet,
+	recvCh chan<- ethertalk.Packet,
+) {
 	for packet := range sendCh {
 		conv, resp := b.etherTalkToUDP(packet)
 		if resp != nil {
@@ -197,7 +200,16 @@ func (b *bridge) markProxyForNode(node ddp.Node) {
 	b.nodes[node] = true
 }
 
-func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(
+	ctx context.Context,
+	recvCh chan<- ethertalk.Packet,
+) {
+	go func() {
+		<-ctx.Done()
+		b.conn.Close()
+	}()
+	defer close(recvCh)
+
 	bin := make([]byte, 700)
 	for {
 		n, addr, err := b.conn.ReadFromUDP(bin)

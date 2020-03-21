@@ -107,6 +107,8 @@ func (b *bridge) setupCapture(dev string) (capturer, error) {
 }
 
 func (b *bridge) capture(ch chan<- ethertalk.Packet) {
+	defer close(ch)
+
 	localAddrs := map[ethernet.Addr]bool{}
 	for {
 		data, ci, err := b.capturer.ReadPacketData()
