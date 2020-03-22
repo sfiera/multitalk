@@ -138,6 +138,10 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 		return nil, nil
 	}
 
+	if (ext.DstNet != 0) && (ext.DstNet != b.network) {
+		return nil, nil
+	}
+
 	short := ddp.ExtToShort(ext)
 	result, err := ltou.AppleTalk(b.pid, ext.DstNode, ext.SrcNode, short)
 	if err != nil {
@@ -153,6 +157,10 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 	a := aarp.Packet{}
 	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
+		return nil, nil
+	}
+
+	if (a.Dst.Proto.Network != 0) && (a.Dst.Proto.Network != b.network) {
 		return nil, nil
 	}
 
