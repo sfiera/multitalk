@@ -30,22 +30,11 @@ package dbg
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"strings"
 
 	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
-	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
-)
-
-var (
-	llapOps = map[aarp.Opcode]string{
-		aarp.RequestOp:  "request",
-		aarp.ResponseOp: "response",
-		aarp.ProbeOp:    "probe",
-	}
 )
 
 type bridge struct{}
@@ -67,10 +56,12 @@ func (b *bridge) Start(ctx context.Context) (
 
 func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
-		components := []string{
-			fmt.Sprintf("%s <- %s", ethAddr(packet.Dst), ethAddr(packet.Src)),
+		switch packet.SNAPProto {
+		case ethertalk.AARPProto:
+			logAARPPacket(packet)
+		case ethertalk.AppleTalkProto:
+			logAppleTalkPacket(packet)
 		}
-		log.Print(strings.Join(logSnap(packet, components), ": "))
 	}
 }
 
@@ -78,66 +69,45 @@ func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
 	close(recvCh)
 }
 
-func logSnap(packet ethertalk.Packet, components []string) []string {
-	if packet.LinkHeader != ethertalk.SNAP {
-		return append(components, "????")
-	}
-	components = append(components, "snap")
-
-	switch packet.SNAPProto {
-	case ethertalk.AARPProto:
-		return logAARPPacket(packet, components)
-	case ethertalk.AppleTalkProto:
-		return logAppleTalkPacket(packet, components)
-	default:
-		return append(components, "????")
-	}
-}
-
-func logAARPPacket(packet ethertalk.Packet, components []string) []string {
-	components = append(components, "aarp")
+func logAARPPacket(packet ethertalk.Packet) {
 	a := aarp.Packet{}
 	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
-		return append(components, "????")
+		log.Printf("aarp: invalid payload")
+		return
+	} else if a.Header != aarp.EthernetLLAPBridging {
+		log.Printf("aarp: not eth-llap bridging")
+		return
 	}
-
-	opname := llapOps[a.Opcode]
-	if opname == "" {
-		return append(components, fmt.Sprintf("eth-llap %02x", a.Opcode))
+	switch a.Opcode {
+	case aarp.RequestOp:
+		log.Printf(
+			"aarp rqst: %d.%d <- %d.%d",
+			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+	case aarp.ResponseOp:
+		log.Printf(
+			"aarp resp: %d.%d <- %d.%d",
+			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+	case aarp.ProbeOp:
+		log.Printf(
+			"aarp prob: %d.%d <- %d.%d",
+			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+	default:
+		log.Printf(
+			"aarp ????: %d.%d <- %d.%d",
+			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
 	}
-	return append(components, fmt.Sprintf(
-		"eth-llap %s %s/%s -> %s/%s",
-		opname,
-		ethAddr(a.Src.Hardware), atalkAddr(a.Src.Proto),
-		ethAddr(a.Dst.Hardware), atalkAddr(a.Dst.Proto)))
 }
 
-func logAppleTalkPacket(packet ethertalk.Packet, components []string) []string {
-	components = append(components, "atlk")
+func logAppleTalkPacket(packet ethertalk.Packet) {
 	d := ddp.ExtPacket{}
 	err := ddp.ExtUnmarshal(packet.Payload, &d)
 	if err != nil {
-		return append(components, "????")
+		log.Printf("ddp: invalid payload")
+		return
 	}
-
-	components = append(components, fmt.Sprintf(
-		"ddp [%04x] %d.%d:%d <- %d.%d:%d %02x",
-		d.Cksum,
-		d.DstNet, d.DstNode, d.DstSocket,
-		d.SrcNet, d.SrcNode, d.SrcSocket,
-		d.Proto,
-	))
-	return append(components, fmt.Sprintf("%+v", d.Data))
-}
-
-func ethAddr(addr ethernet.Addr) string {
-	return fmt.Sprintf(
-		"%02x:%02x:%02x:%02x:%02x:%02x",
-		addr[0], addr[1], addr[2], addr[3], addr[4], addr[5],
-	)
-}
-
-func atalkAddr(addr ddp.Addr) string {
-	return fmt.Sprintf("%d.%d", addr.Network, addr.Node)
+	log.Printf(
+		"ddp: %d.%d.%d <- %d.%d.%d: %02x: %+v [%04x]",
+		d.DstNet, d.DstNode, d.DstSocket, d.SrcNet, d.SrcNode, d.DstSocket,
+		d.Proto, d.Data, d.Cksum)
 }
