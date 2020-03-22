@@ -39,6 +39,7 @@ import (
 	"github.com/sfiera/multitalk/internal/raw"
 	"github.com/sfiera/multitalk/internal/tcp"
 	"github.com/sfiera/multitalk/internal/udp"
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -52,6 +53,8 @@ var (
 	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
 	debug   = pflag.BoolP("debug", "d", false, "log packets")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
+
+	defaultNet = ddp.Network(0xff00)
 )
 
 type (
@@ -134,7 +137,7 @@ func Bridges() (bridges []bridge, _ error) {
 	}
 
 	for _, dev := range *multi {
-		udp, err := udp.Multicast(dev)
+		udp, err := udp.Multicast(dev, defaultNet)
 		if err != nil {
 			return nil, err
 		}

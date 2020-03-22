@@ -43,11 +43,9 @@ import (
 	"github.com/sfiera/multitalk/pkg/ltou"
 )
 
-var (
-	defaultNet = ddp.Network(0xff00)
-)
-
 type bridge struct {
+	network ddp.Network
+
 	pid   uint32
 	iface *net.Interface
 	eth   ethernet.Addr
@@ -57,16 +55,17 @@ type bridge struct {
 	nodesMu sync.Mutex
 }
 
-func Multicast(iface string) (*bridge, error) {
+func Multicast(iface string, network ddp.Network) (*bridge, error) {
 	i, err := net.InterfaceByName(iface)
 	if err != nil {
 		return nil, fmt.Errorf("interface %s: %s", iface, err.Error())
 	}
 
 	b := bridge{
-		pid:   uint32(os.Getpid()),
-		iface: i,
-		nodes: map[ddp.Node]bool{},
+		network: network,
+		pid:     uint32(os.Getpid()),
+		iface:   i,
+		nodes:   map[ddp.Node]bool{},
 	}
 	copy(b.eth[:], i.HardwareAddr)
 
@@ -279,7 +278,7 @@ func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 		return nil
 	}
 
-	ext := ddp.ShortToExt(d, defaultNet, packet.LLAP.DstNode, packet.LLAP.SrcNode)
+	ext := ddp.ShortToExt(d, b.network, packet.LLAP.DstNode, packet.LLAP.SrcNode)
 	out, err := ethertalk.AppleTalk(b.eth, ext)
 	if err != nil {
 		return nil
@@ -303,7 +302,7 @@ func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.P
 func (b *bridge) udpToProbe(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
 	out, err := ethertalk.AARP(
 		b.eth,
-		aarp.Probe(b.eth, ddp.Addr{Network: defaultNet, Node: packet.LLAP.DstNode}),
+		aarp.Probe(b.eth, ddp.Addr{Network: b.network, Node: packet.LLAP.DstNode}),
 	)
 	if err != nil {
 		return nil
@@ -315,11 +314,11 @@ func (b *bridge) udpToAck(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 	out, err := ethertalk.AARP(b.eth, aarp.Response(
 		aarp.AddrPair{
 			Hardware: b.eth,
-			Proto:    ddp.Addr{Network: defaultNet, Node: packet.LLAP.SrcNode},
+			Proto:    ddp.Addr{Network: b.network, Node: packet.LLAP.SrcNode},
 		},
 		aarp.AddrPair{
 			Hardware: b.eth,
-			Proto:    ddp.Addr{Network: defaultNet, Node: packet.LLAP.DstNode},
+			Proto:    ddp.Addr{Network: b.network, Node: packet.LLAP.DstNode},
 		},
 	))
 	if err != nil {
