@@ -128,6 +128,10 @@ func (b *bridge) etherTalkToUDP(packet ethertalk.Packet) (
 	}
 }
 
+func (b *bridge) isLocal(net ddp.Network) bool {
+	return net == 0 || net == b.network
+}
+
 func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 	converted *ltou.Packet,
 	response *ethertalk.Packet,
@@ -138,16 +142,20 @@ func (b *bridge) ddpToUDP(packet ethertalk.Packet) (
 		return nil, nil
 	}
 
-	if (ext.DstNet != 0) && (ext.DstNet != b.network) {
-		return nil, nil
+	if b.isLocal(ext.SrcNet) && b.isLocal(ext.DstNet) {
+		short := ddp.ExtToShort(ext)
+		result, err := ltou.AppleTalk(b.pid, ext.DstNode, ext.SrcNode, short)
+		if err != nil {
+			return nil, nil
+		}
+		return result, nil
+	} else {
+		result, err := ltou.ExtAppleTalk(b.pid, ext.DstNode, ext.SrcNode, ext)
+		if err != nil {
+			return nil, nil
+		}
+		return result, nil
 	}
-
-	short := ddp.ExtToShort(ext)
-	result, err := ltou.AppleTalk(b.pid, ext.DstNode, ext.SrcNode, short)
-	if err != nil {
-		return nil, nil
-	}
-	return result, nil
 }
 
 func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
@@ -160,7 +168,7 @@ func (b *bridge) aarpToUDP(packet ethertalk.Packet) (
 		return nil, nil
 	}
 
-	if (a.Dst.Proto.Network != 0) && (a.Dst.Proto.Network != b.network) {
+	if !b.isLocal(a.Src.Proto.Network) || !b.isLocal(a.Dst.Proto.Network) {
 		return nil, nil
 	}
 
