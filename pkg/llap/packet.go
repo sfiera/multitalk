@@ -129,13 +129,13 @@ func AppleTalk(dstNode, srcNode ddp.Node, payload ddp.Packet) (*Packet, error) {
 func ExtAppleTalk(dstNode, srcNode ddp.Node, payload ddp.ExtPacket) (*Packet, error) {
 	data, err := ddp.ExtMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal ddp: %s", err.Error())
+		return nil, fmt.Errorf("marshal ext ddp: %s", err.Error())
 	}
 	return &Packet{
 		Header: Header{
 			DstNode: dstNode,
 			SrcNode: srcNode,
-			Kind:    TypeDDP,
+			Kind:    TypeExtDDP,
 		},
 		Payload: data,
 	}, nil
