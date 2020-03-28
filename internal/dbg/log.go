@@ -108,6 +108,6 @@ func logAppleTalkPacket(packet ethertalk.Packet) {
 	}
 	log.Printf(
 		"ddp: %d.%d.%d <- %d.%d.%d: %02x: %+v [%04x]",
-		d.DstNet, d.DstNode, d.DstSocket, d.SrcNet, d.SrcNode, d.DstSocket,
+		d.DstNet, d.DstNode, d.DstSocket, d.SrcNet, d.SrcNode, d.SrcSocket,
 		d.Proto, d.Data, d.Cksum)
 }
