@@ -31,6 +31,7 @@ package raw
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"sync"
 
@@ -44,8 +45,8 @@ import (
 type (
 	bridge struct {
 		dev         string
+		eth         ethernet.Addr
 		mu          sync.Mutex
-		local       []ethertalk.Packet
 		capturer    capturer
 		transmitter transmitter
 	}
@@ -60,7 +61,13 @@ type (
 )
 
 func EtherTalk(dev string) (b *bridge, err error) {
+	i, err := net.InterfaceByName(dev)
+	if err != nil {
+		return nil, fmt.Errorf("interface %s: %s", dev, err.Error())
+	}
+
 	b = &bridge{dev: dev}
+	copy(b.eth[:], i.HardwareAddr)
 
 	b.capturer, err = b.setupCapture(dev)
 	if err != nil {
@@ -134,22 +141,11 @@ func (b *bridge) packet_handler(
 	packet ethertalk.Packet,
 	localAddrs map[ethernet.Addr]bool,
 ) {
-	// DebugLog("packet_handler entered%s", "\n")
-
 	// Check to make sure the packet we just received wasn't sent
 	// by us (the bridge), otherwise this is how loops happen
-	b.mu.Lock()
-	for i, np := range b.local {
-		if ethertalk.Equal(&np, &packet) {
-			last := len(b.local) - 1
-			b.local[i] = b.local[last]
-			b.local = b.local[:last]
-			b.mu.Unlock()
-			// DebugLog("packet_handler returned, skipping our own packet%s", "\n")
-			return
-		}
+	if packet.Src == b.eth {
+		return
 	}
-	b.mu.Unlock()
 
 	// Check to see if the destination address matches any addresses
 	// in the list of source addresses we've seen on our network.
@@ -179,11 +175,9 @@ func (b *bridge) setupTransmit(dev string) (transmitter, error) {
 
 func (b *bridge) transmit(ch <-chan ethertalk.Packet) {
 	for packet := range ch {
-		// printBuffer(packet)
-		// We now have a frame, time to send it out.
-		b.mu.Lock()
-		b.local = append(b.local, packet)
-		b.mu.Unlock()
+		// Rewrite the source of the packet, so that capture() will know
+		// not to forward it back and create a loop.
+		packet.Src = b.eth
 
 		bin, err := ethertalk.Marshal(packet)
 		if err != nil {
