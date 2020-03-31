@@ -246,10 +246,19 @@ func (b *bridge) capture(
 			continue
 		}
 
-		out := b.udpToEtherTalk(addr, packet)
-		if out != nil {
+		conv, resp := b.udpToEtherTalk(addr, packet)
+		if resp != nil {
+			data, err := ltou.Marshal(*resp)
+			if err != nil {
+				continue
+			}
+			_, err = b.conn.WriteToUDP(data, ltou.MulticastAddr)
+			if err != nil {
+				continue
+			}
+		} else if conv != nil {
 			b.markProxyForNode(packet.LLAP.SrcNode)
-			recvCh <- *out
+			recvCh <- *conv
 		}
 	}
 }
@@ -272,7 +281,10 @@ func (b *bridge) isSender(from *net.UDPAddr, packet ltou.Packet) bool {
 	return false
 }
 
-func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
+func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet ltou.Packet) (
+	converted *ethertalk.Packet,
+	response *ltou.Packet,
+) {
 	switch packet.LLAP.Kind {
 	case llap.TypeDDP:
 		return b.udpToDDP(addr, packet)
@@ -283,50 +295,62 @@ func (b *bridge) udpToEtherTalk(addr *net.UDPAddr, packet ltou.Packet) *ethertal
 	case llap.TypeAck:
 		return b.udpToAck(addr, packet)
 	default:
-		return nil
+		return nil, nil
 	}
 }
 
-func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
+func (b *bridge) udpToDDP(addr *net.UDPAddr, packet ltou.Packet) (
+	converted *ethertalk.Packet,
+	response *ltou.Packet,
+) {
 	d := ddp.Packet{}
 	err := ddp.Unmarshal(packet.LLAP.Payload, &d)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 
 	ext := ddp.ShortToExt(d, b.network, packet.LLAP.DstNode, packet.LLAP.SrcNode)
 	out, err := ethertalk.AppleTalk(b.eth, ext)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
-func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
+func (b *bridge) udpToExtDDP(addr *net.UDPAddr, packet ltou.Packet) (
+	converted *ethertalk.Packet,
+	response *ltou.Packet,
+) {
 	d := ddp.ExtPacket{}
 	err := ddp.ExtUnmarshal(packet.LLAP.Payload, &d)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	out, err := ethertalk.AppleTalk(b.eth, d)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
-func (b *bridge) udpToProbe(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
+func (b *bridge) udpToProbe(addr *net.UDPAddr, packet ltou.Packet) (
+	converted *ethertalk.Packet,
+	response *ltou.Packet,
+) {
 	out, err := ethertalk.AARP(
 		b.eth,
 		aarp.Probe(b.eth, ddp.Addr{Network: b.network, Node: packet.LLAP.DstNode}),
 	)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
 
-func (b *bridge) udpToAck(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Packet {
+func (b *bridge) udpToAck(addr *net.UDPAddr, packet ltou.Packet) (
+	converted *ethertalk.Packet,
+	response *ltou.Packet,
+) {
 	out, err := ethertalk.AARP(b.eth, aarp.Response(
 		aarp.AddrPair{
 			Hardware: b.eth,
@@ -338,7 +362,7 @@ func (b *bridge) udpToAck(addr *net.UDPAddr, packet ltou.Packet) *ethertalk.Pack
 		},
 	))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return out
+	return out, nil
 }
