@@ -5,7 +5,7 @@ MultiTalk is a repeater for different transports for AppleTalk:
 * LocalTalk-over-UDP (LToU) multicast, spoken by Mini vMac 37+
 * TCP, spoken by the `kwai` component of bbraun’s abridge
 
-[![Build Status](https://cloud.drone.io/api/badges/sfiera/multitalk/status.svg)](https://cloud.drone.io/sfiera/multitalk) [![Godoc](https://godoc.org/github.com/sfiera/multitalk/pkg?status.svg)](https://godoc.org/github.com/sfiera/multitalk/pkg)
+[![Build Status](https://cloud.drone.io/api/badges/sfiera/multitalk/status.svg)](https://cloud.drone.io/sfiera/multitalk) [![Go Reference](https://pkg.go.dev/badge/github.com/sfiera/multitalk/pkg.svg)](https://pkg.go.dev/github.com/sfiera/multitalk/pkg)
 
 # Usage
 
