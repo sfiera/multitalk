@@ -35,12 +35,12 @@ import (
 
 	"github.com/spf13/pflag"
 
+	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/internal/dbg"
 	"github.com/sfiera/multitalk/internal/raw"
 	"github.com/sfiera/multitalk/internal/tcp"
 	"github.com/sfiera/multitalk/internal/udp"
 	"github.com/sfiera/multitalk/pkg/ddp"
-	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
 const (
@@ -57,20 +57,6 @@ var (
 	defaultNet = ddp.Network(0xff00)
 )
 
-type (
-	iface struct {
-		Send chan<- ethertalk.Packet
-		Recv <-chan ethertalk.Packet
-	}
-
-	bridge interface {
-		Start(ctx context.Context) (
-			send chan<- ethertalk.Packet,
-			recv <-chan ethertalk.Packet,
-		)
-	}
-)
-
 func Main() {
 	if *version {
 		fmt.Println(versionString)
@@ -82,37 +68,10 @@ func Main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-	Run(context.Background(), bridges)
+	bridge.Run(context.Background(), bridges)
 }
 
-func Run(ctx context.Context, bridges []bridge) {
-	ifaces := []iface{}
-	for _, b := range bridges {
-		send, recv := b.Start(ctx)
-		ifaces = append(ifaces, iface{send, recv})
-	}
-
-	for _, iface := range ifaces {
-		sends := []chan<- ethertalk.Packet{}
-		for _, other := range ifaces {
-			if iface.Send != other.Send {
-				sends = append(sends, other.Send)
-			}
-		}
-
-		go func(recv <-chan ethertalk.Packet) {
-			for packet := range recv {
-				for _, send := range sends {
-					send <- packet
-				}
-			}
-		}(iface.Recv)
-	}
-
-	<-ctx.Done()
-}
-
-func Bridges() (bridges []bridge, _ error) {
+func Bridges() (bridges []bridge.Bridge, _ error) {
 	niface := len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return nil, fmt.Errorf("no interfaces specified")
