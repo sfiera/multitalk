@@ -40,37 +40,45 @@ type (
 		recv <-chan ethertalk.Packet
 	}
 
+	packetFrom struct {
+		packet *ethertalk.Packet
+		send   chan<- ethertalk.Packet
+	}
+
 	Bridge interface {
 		Start(ctx context.Context) (
 			send chan<- ethertalk.Packet,
 			recv <-chan ethertalk.Packet,
 		)
 	}
+
+	bridgeGroup struct {
+		recvCh chan packetFrom
+		sendCh []chan<- ethertalk.Packet
+	}
 )
 
 func Run(ctx context.Context, bridges []Bridge) {
-	ifaces := []iface{}
+	g := bridgeGroup{
+		make(chan packetFrom),
+		nil,
+	}
+
 	for _, b := range bridges {
 		send, recv := b.Start(ctx)
-		ifaces = append(ifaces, iface{send, recv})
+		g.sendCh = append(g.sendCh, send)
+		go func() {
+			for pak := range recv {
+				g.recvCh <- packetFrom{&pak, send}
+			}
+		}()
 	}
 
-	for _, iface := range ifaces {
-		sends := []chan<- ethertalk.Packet{}
-		for _, other := range ifaces {
-			if iface.send != other.send {
-				sends = append(sends, other.send)
+	for pak := range g.recvCh {
+		for _, sendCh := range g.sendCh {
+			if sendCh != pak.send {
+				sendCh <- *pak.packet
 			}
 		}
-
-		go func(recv <-chan ethertalk.Packet) {
-			for packet := range recv {
-				for _, send := range sends {
-					send <- packet
-				}
-			}
-		}(iface.recv)
 	}
-
-	<-ctx.Done()
 }

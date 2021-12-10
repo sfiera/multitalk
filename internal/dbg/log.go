@@ -49,12 +49,12 @@ func (b *bridge) Start(ctx context.Context) (
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(recvCh)
-	go b.transmit(sendCh)
+	go b.capture(ctx, recvCh)
+	go b.transmit(ctx, sendCh)
 	return sendCh, recvCh
 }
 
-func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
+func (b *bridge) transmit(ctx context.Context, sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		switch packet.SNAPProto {
 		case ethertalk.AARPProto:
@@ -65,7 +65,8 @@ func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 	}
 }
 
-func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+	<-ctx.Done()
 	close(recvCh)
 }
 
