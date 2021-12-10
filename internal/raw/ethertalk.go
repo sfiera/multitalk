@@ -113,15 +113,15 @@ func (b *bridge) setupCapture(dev string) (capturer, error) {
 	return capturer, nil
 }
 
-func (b *bridge) capture(ch chan<- ethertalk.Packet) {
-	defer close(ch)
+func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+	defer close(recvCh)
 
 	localAddrs := map[ethernet.Addr]bool{}
 	for {
 		data, ci, err := b.capturer.ReadPacketData()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "read packet %s: %s\n", b.dev, err.Error())
-			os.Exit(5)
+			return
 		}
 		if ci.CaptureLength != ci.Length {
 			// DebugLog("truncated packet! %s\n", "");
@@ -132,7 +132,7 @@ func (b *bridge) capture(ch chan<- ethertalk.Packet) {
 			fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
 			continue
 		}
-		b.packet_handler(ch, packet, localAddrs)
+		b.packet_handler(recvCh, packet, localAddrs)
 	}
 }
 

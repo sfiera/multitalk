@@ -74,11 +74,11 @@ func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 }
 
 func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+	defer close(recvCh)
 	go func() {
 		<-ctx.Done()
 		b.conn.Close()
 	}()
-	defer close(recvCh)
 
 	for {
 		// receive a frame and send it out on the net
@@ -86,7 +86,7 @@ func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 		err := binary.Read(b.conn, binary.BigEndian, &length)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
-			os.Exit(1)
+			return
 		}
 
 		if length > 4096 {

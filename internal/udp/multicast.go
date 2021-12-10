@@ -220,18 +220,18 @@ func (b *bridge) capture(
 	ctx context.Context,
 	recvCh chan<- ethertalk.Packet,
 ) {
+	defer close(recvCh)
 	go func() {
 		<-ctx.Done()
 		b.conn.Close()
 	}()
-	defer close(recvCh)
 
 	bin := make([]byte, 700)
 	for {
 		n, addr, err := b.conn.ReadFromUDP(bin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "udp recv: %s\n", err.Error())
-			os.Exit(1)
+			return
 		}
 
 		packet := ltou.Packet{}
