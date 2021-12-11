@@ -68,7 +68,7 @@ func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
 			fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
 			continue
 		}
-		_ = binary.Write(b.conn, binary.BigEndian, len(bin))
+		_ = binary.Write(b.conn, binary.BigEndian, uint32(len(bin)))
 		_, _ = b.conn.Write(bin)
 	}
 }
