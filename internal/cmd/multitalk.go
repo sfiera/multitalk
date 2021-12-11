@@ -104,7 +104,11 @@ func Bridges() (bridges []bridge.Bridge, _ error) {
 	}
 
 	if *debug {
-		bridges = append(bridges, dbg.Logger())
+		log, err := dbg.Logger()
+		if err != nil {
+			return nil, err
+		}
+		bridges = append(bridges, log)
 	}
 	return
 }

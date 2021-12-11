@@ -29,21 +29,30 @@
 package dbg
 
 import (
+	"bytes"
 	"context"
-	"log"
+	"fmt"
+
+	"go.uber.org/zap"
 
 	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
-type bridge struct{}
-
-func Logger() *bridge {
-	return &bridge{}
+type bridge struct {
+	log *zap.Logger
 }
 
-func (b *bridge) Start(ctx context.Context) (
+func Logger() (*bridge, error) {
+	log, err := zap.NewDevelopment()
+	if err != nil {
+		return nil, err
+	}
+	return &bridge{log}, nil
+}
+
+func (b bridge) Start(ctx context.Context) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
@@ -54,61 +63,75 @@ func (b *bridge) Start(ctx context.Context) (
 	return sendCh, recvCh
 }
 
-func (b *bridge) transmit(ctx context.Context, sendCh <-chan ethertalk.Packet) {
+func (b bridge) transmit(ctx context.Context, sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		switch packet.SNAPProto {
 		case ethertalk.AARPProto:
-			logAARPPacket(packet)
+			b.logAARPPacket(packet)
 		case ethertalk.AppleTalkProto:
-			logAppleTalkPacket(packet)
+			b.logAppleTalkPacket(packet)
 		}
 	}
 }
 
-func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+func (b bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 	<-ctx.Done()
 	close(recvCh)
 }
 
-func logAARPPacket(packet ethertalk.Packet) {
+func (b bridge) logAARPPacket(packet ethertalk.Packet) {
+	log := b.log.With(zap.String("protocol", "aarp"))
 	a := aarp.Packet{}
 	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
-		log.Printf("aarp: invalid payload")
+		log.With(zap.Error(err)).Error("unmarshal failed")
 		return
 	} else if a.Header != aarp.EthernetLLAPBridging {
-		log.Printf("aarp: not eth-llap bridging")
+		log.Warn("not eth-llap bridging")
 		return
 	}
+	log = log.With(
+		zap.String("dst", fmt.Sprintf("%d.%d", a.Dst.Proto.Network, a.Dst.Proto.Node)),
+		zap.String("src", fmt.Sprintf("%d.%d", a.Src.Proto.Network, a.Src.Proto.Node)),
+	)
+
 	switch a.Opcode {
 	case aarp.RequestOp:
-		log.Printf(
-			"aarp rqst: %d.%d <- %d.%d",
-			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+		log.With(zap.String("op", "request")).Info("packet")
 	case aarp.ResponseOp:
-		log.Printf(
-			"aarp resp: %d.%d <- %d.%d",
-			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+		log.With(zap.String("op", "response")).Info("packet")
 	case aarp.ProbeOp:
-		log.Printf(
-			"aarp prob: %d.%d <- %d.%d",
-			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+		log.With(zap.String("op", "probe")).Info("packet")
 	default:
-		log.Printf(
-			"aarp ????: %d.%d <- %d.%d",
-			a.Dst.Proto.Network, a.Dst.Proto.Node, a.Src.Proto.Network, a.Src.Proto.Node)
+		log.With(zap.String("op", "unknown")).Info("packet")
 	}
 }
 
-func logAppleTalkPacket(packet ethertalk.Packet) {
+func (b *bridge) logAppleTalkPacket(packet ethertalk.Packet) {
+	log := b.log.With(zap.String("protocol", "ddp"))
 	d := ddp.ExtPacket{}
 	err := ddp.ExtUnmarshal(packet.Payload, &d)
 	if err != nil {
-		log.Printf("ddp: invalid payload")
+		log.With(zap.Error(err)).Error("unmarshal failed")
 		return
 	}
-	log.Printf(
-		"ddp: %d.%d.%d <- %d.%d.%d: %02x: %+v [%04x]",
-		d.DstNet, d.DstNode, d.DstSocket, d.SrcNet, d.SrcNode, d.SrcSocket,
-		d.Proto, d.Data, d.Cksum)
+	log = log.With(
+		zap.String("dst", fmt.Sprintf("%d.%d.%d", d.DstNet, d.DstNode, d.DstSocket)),
+		zap.String("src", fmt.Sprintf("%d.%d.%d", d.SrcNet, d.SrcNode, d.SrcSocket)),
+		zap.Uint8("proto", d.Proto),
+		zap.Uint16("cksum", d.Cksum),
+	)
+
+	log.With(zap.String("data", hex(d.Data))).Info("packet")
+}
+
+func hex(data []byte) string {
+	buf := bytes.Buffer{}
+	for i, b := range data {
+		if i > 0 && i%4 == 0 {
+			fmt.Fprint(&buf, " ")
+		}
+		fmt.Fprintf(&buf, "%02x", b)
+	}
+	return string(buf.Bytes())
 }
