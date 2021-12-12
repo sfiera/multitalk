@@ -54,25 +54,31 @@ func (b bridge) Start(ctx context.Context) (
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(ctx, recvCh)
-	go b.transmit(ctx, sendCh)
+	go b.loop(ctx, sendCh, recvCh)
 	return sendCh, recvCh
 }
 
-func (b bridge) transmit(ctx context.Context, sendCh <-chan ethertalk.Packet) {
-	for packet := range sendCh {
-		switch packet.SNAPProto {
-		case ethertalk.AARPProto:
-			b.logAARPPacket(packet)
-		case ethertalk.AppleTalkProto:
-			b.logAppleTalkPacket(packet)
+func (b bridge) loop(
+	ctx context.Context,
+	sendCh <-chan ethertalk.Packet, recvCh chan<- ethertalk.Packet,
+) {
+	for {
+		select {
+		case packet := <-sendCh:
+			switch packet.SNAPProto {
+			case ethertalk.AARPProto:
+				b.logAARPPacket(packet)
+			case ethertalk.AppleTalkProto:
+				b.logAppleTalkPacket(packet)
+			}
+
+		case <-ctx.Done():
+			close(recvCh)
+			for range sendCh {
+			}
+			return
 		}
 	}
-}
-
-func (b bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
-	<-ctx.Done()
-	close(recvCh)
 }
 
 func (b bridge) logAARPPacket(packet ethertalk.Packet) {
@@ -81,9 +87,6 @@ func (b bridge) logAARPPacket(packet ethertalk.Packet) {
 	err := aarp.Unmarshal(packet.Payload, &a)
 	if err != nil {
 		log.With(zap.Error(err)).Error("unmarshal failed")
-		return
-	} else if a.Header != aarp.EthernetLLAPBridging {
-		log.Warn("not eth-llap bridging")
 		return
 	}
 	log = log.With(
@@ -99,7 +102,7 @@ func (b bridge) logAARPPacket(packet ethertalk.Packet) {
 	case aarp.ProbeOp:
 		log.With(zap.String("op", "probe")).Info("packet")
 	default:
-		log.With(zap.String("op", "unknown")).Info("packet")
+		log.With(zap.String("op", "unknown")).Warn("packet")
 	}
 }
 
