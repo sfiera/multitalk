@@ -44,12 +44,8 @@ type bridge struct {
 	log *zap.Logger
 }
 
-func Logger() (*bridge, error) {
-	log, err := zap.NewDevelopment()
-	if err != nil {
-		return nil, err
-	}
-	return &bridge{log}, nil
+func Logger(log *zap.Logger) *bridge {
+	return &bridge{log}
 }
 
 func (b bridge) Start(ctx context.Context) (

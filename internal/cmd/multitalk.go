@@ -34,6 +34,7 @@ import (
 	"os"
 
 	"github.com/spf13/pflag"
+	"go.uber.org/zap"
 
 	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/internal/dbg"
@@ -64,8 +65,14 @@ func Main() {
 		os.Exit(0)
 	}
 
+	log, err := zap.NewDevelopment()
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+
 	g := bridge.NewGroup()
-	err := Bridges(context.Background(), g)
+	err = bridges(context.Background(), log, g)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
@@ -73,7 +80,7 @@ func Main() {
 	g.Run()
 }
 
-func Bridges(ctx context.Context, grp *bridge.Group) error {
+func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 	niface := len(*client) + len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
 		return fmt.Errorf("no interfaces specified")
@@ -114,10 +121,7 @@ func Bridges(ctx context.Context, grp *bridge.Group) error {
 	}
 
 	if *debug {
-		log, err := dbg.Logger()
-		if err != nil {
-			return err
-		}
+		log := dbg.Logger(log)
 		grp.Add(log.Start(ctx))
 	}
 	return nil
