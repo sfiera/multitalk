@@ -49,8 +49,9 @@ const (
 
 var (
 	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
-	server  = pflag.StringArrayP("server", "s", []string{}, "server to bridge via TCP")
 	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
+	client  = pflag.StringArrayP("tcp-client", "t", []string{}, "address to dial via TCP")
+	server  = pflag.StringArrayP("tcp-server", "T", []string{}, "address to listen via TCP")
 	debug   = pflag.BoolP("debug", "d", false, "log packets")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
 
@@ -63,52 +64,61 @@ func Main() {
 		os.Exit(0)
 	}
 
-	bridges, err := Bridges()
+	g := bridge.NewGroup()
+	err := Bridges(context.Background(), g)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-	bridge.Run(context.Background(), bridges)
+	g.Run()
 }
 
-func Bridges() (bridges []bridge.Bridge, _ error) {
-	niface := len(*server) + len(*ether) + len(*multi)
+func Bridges(ctx context.Context, grp *bridge.Group) error {
+	niface := len(*client) + len(*server) + len(*ether) + len(*multi)
 	if niface == 0 {
-		return nil, fmt.Errorf("no interfaces specified")
-	} else if (niface == 1) && !*debug {
-		return nil, fmt.Errorf("only one interface specified")
-	}
-
-	for _, s := range *server {
-		tcp, err := tcp.TCPClient(s)
-		if err != nil {
-			return nil, err
-		}
-		bridges = append(bridges, tcp)
+		return fmt.Errorf("no interfaces specified")
+	} else if (niface == 1) && (len(*server) == 0) && !*debug {
+		return fmt.Errorf("only one interface specified")
 	}
 
 	for _, dev := range *ether {
 		et, err := raw.EtherTalk(dev)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		bridges = append(bridges, et)
+		grp.Add(et.Start(ctx))
 	}
 
 	for _, dev := range *multi {
 		udp, err := udp.Multicast(dev, defaultNet)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		bridges = append(bridges, udp)
+		grp.Add(udp.Start(ctx))
+	}
+
+	for _, s := range *client {
+		tcp, err := tcp.TCPClient(s)
+		if err != nil {
+			return err
+		}
+		grp.Add(tcp.Start(ctx))
+	}
+
+	for _, s := range *server {
+		tcp, err := tcp.TCPServer(s)
+		if err != nil {
+			return err
+		}
+		tcp.Serve(ctx, grp)
 	}
 
 	if *debug {
 		log, err := dbg.Logger()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		bridges = append(bridges, log)
+		grp.Add(log.Start(ctx))
 	}
-	return
+	return nil
 }

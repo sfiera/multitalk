@@ -38,52 +38,52 @@ import (
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
-type bridge struct {
+type client struct {
 	conn net.Conn
 }
 
-func TCPClient(server string) (*bridge, error) {
+func TCPClient(server string) (*client, error) {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %s", server, err.Error())
 	}
-	return &bridge{conn}, nil
+	return &client{conn}, nil
 }
 
-func (b *bridge) Start(ctx context.Context) (
+func (c *client) Start(ctx context.Context) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(ctx, recvCh)
-	go b.transmit(sendCh)
+	go c.capture(ctx, recvCh)
+	go c.transmit(sendCh)
 	return sendCh, recvCh
 }
 
-func (b *bridge) transmit(sendCh <-chan ethertalk.Packet) {
+func (c *client) transmit(sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		bin, err := ethertalk.Marshal(packet)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
 			continue
 		}
-		_ = binary.Write(b.conn, binary.BigEndian, uint32(len(bin)))
-		_, _ = b.conn.Write(bin)
+		_ = binary.Write(c.conn, binary.BigEndian, uint32(len(bin)))
+		_, _ = c.conn.Write(bin)
 	}
 }
 
-func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+func (c *client) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 	defer close(recvCh)
 	go func() {
 		<-ctx.Done()
-		b.conn.Close()
+		c.conn.Close()
 	}()
 
 	for {
 		// receive a frame and send it out on the net
 		length := uint32(0)
-		err := binary.Read(b.conn, binary.BigEndian, &length)
+		err := binary.Read(c.conn, binary.BigEndian, &length)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
 			return
@@ -96,10 +96,10 @@ func (b *bridge) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 		// DebugLog("receiving packet of length: %u\n", length);
 
 		data := make([]byte, length)
-		_, err = b.conn.Read(data)
+		_, err = c.conn.Read(data)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
-			os.Exit(1)
+			return
 		}
 		// DebugLog("Successfully received packet\n%s", "");
 

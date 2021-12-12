@@ -25,87 +25,37 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// definition of bridges
-package bridge
+// Communicates with TCP servers
+package tcp
 
 import (
 	"context"
+	"fmt"
+	"net"
 
-	"github.com/sfiera/multitalk/pkg/ethertalk"
+	"github.com/sfiera/multitalk/internal/bridge"
 )
 
-type (
-	iface struct {
-		send chan<- ethertalk.Packet
-		recv <-chan ethertalk.Packet
-	}
-
-	packetFrom struct {
-		packet *ethertalk.Packet
-		send   chan<- ethertalk.Packet
-	}
-
-	Bridge interface {
-		Start(ctx context.Context) (
-			send chan<- ethertalk.Packet,
-			recv <-chan ethertalk.Packet,
-		)
-	}
-
-	Group struct {
-		recvCh chan func(*Group)
-		sendCh []chan<- ethertalk.Packet
-	}
-)
-
-func NewGroup() *Group {
-	return &Group{
-		make(chan func(*Group)),
-		nil,
-	}
+type server struct {
+	listen net.Listener
 }
 
-func (g *Group) Add(send chan<- ethertalk.Packet, recv <-chan ethertalk.Packet) {
+func TCPServer(listen string) (*server, error) {
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, fmt.Errorf("dial %s: %s", listen, err.Error())
+	}
+	return &server{l}, nil
+}
+
+func (s *server) Serve(ctx context.Context, grp *bridge.Group) {
 	go func() {
-		g.recvCh <- add(send)
-		for pak := range recv {
-			g.recvCh <- broadcast(pak, send)
+		for {
+			c, err := s.listen.Accept()
+			if err != nil {
+				continue
+			}
+			grp.Add((&client{c}).Start(ctx))
 		}
-		g.recvCh <- remove(send)
 	}()
-}
-
-func (g *Group) Run() {
-	for fn := range g.recvCh {
-		fn(g)
-	}
-}
-
-func broadcast(pak ethertalk.Packet, send chan<- ethertalk.Packet) func(g *Group) {
-	return func(g *Group) {
-		for _, sendCh := range g.sendCh {
-			if sendCh != send {
-				sendCh <- pak
-			}
-		}
-	}
-}
-
-func add(send chan<- ethertalk.Packet) func(g *Group) {
-	return func(g *Group) {
-		g.sendCh = append(g.sendCh, send)
-	}
-}
-
-func remove(send chan<- ethertalk.Packet) func(g *Group) {
-	return func(g *Group) {
-		var newCh []chan<- ethertalk.Packet
-		for _, ch := range g.sendCh {
-			if ch != send {
-				newCh = append(newCh, ch)
-			}
-		}
-		g.sendCh = newCh
-		close(send)
-	}
 }

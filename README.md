@@ -3,7 +3,7 @@
 MultiTalk is a repeater for different transports for AppleTalk:
 * EtherTalk, spoken by Classic MacOS or netatalk2 machines over Ethernet
 * LocalTalk-over-UDP (LToU) multicast, spoken by Mini vMac 37+
-* TCP, spoken by the `kwai` component of bbraun’s abridge
+* TCP, spoken between multitalk instances or bbraun’s `kwai` server
 
 [![Build Status](https://cloud.drone.io/api/badges/sfiera/multitalk/status.svg)](https://cloud.drone.io/sfiera/multitalk) [![Go Reference](https://pkg.go.dev/badge/github.com/sfiera/multitalk/pkg.svg)](https://pkg.go.dev/github.com/sfiera/multitalk/pkg)
 
