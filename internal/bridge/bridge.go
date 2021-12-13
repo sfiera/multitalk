@@ -29,8 +29,14 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 
+	"go.uber.org/zap"
+
+	"github.com/sfiera/multitalk/pkg/aarp"
+	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -53,13 +59,15 @@ type (
 	}
 
 	Group struct {
+		log    *zap.Logger
 		recvCh chan func(*Group)
 		sendCh []chan<- ethertalk.Packet
 	}
 )
 
-func NewGroup() *Group {
+func NewGroup(log *zap.Logger) *Group {
 	return &Group{
+		log,
 		make(chan func(*Group)),
 		nil,
 	}
@@ -83,6 +91,12 @@ func (g *Group) Run() {
 
 func broadcast(pak ethertalk.Packet, send chan<- ethertalk.Packet) func(g *Group) {
 	return func(g *Group) {
+		switch pak.SNAPProto {
+		case ethertalk.AARPProto:
+			g.logAARPPacket(pak)
+		case ethertalk.AppleTalkProto:
+			g.logAppleTalkPacket(pak)
+		}
 		for _, sendCh := range g.sendCh {
 			if sendCh != send {
 				sendCh <- pak
@@ -108,4 +122,63 @@ func remove(send chan<- ethertalk.Packet) func(g *Group) {
 		g.sendCh = newCh
 		close(send)
 	}
+}
+
+func (g *Group) logAARPPacket(packet ethertalk.Packet) {
+	log := g.log.With(zap.String("protocol", "aarp"))
+	a := aarp.Packet{}
+	err := aarp.Unmarshal(packet.Payload, &a)
+	if err != nil {
+		log.With(zap.Error(err)).Error("unmarshal failed")
+		return
+	}
+
+	if ce := log.Check(zap.DebugLevel, "packet"); ce != nil {
+		ce.Write(
+			zap.String("dst", fmt.Sprintf("%d.%d", a.Dst.Proto.Network, a.Dst.Proto.Node)),
+			zap.String("src", fmt.Sprintf("%d.%d", a.Src.Proto.Network, a.Src.Proto.Node)),
+		)
+
+		switch a.Opcode {
+		case aarp.RequestOp:
+			ce.Write(zap.String("op", "request"))
+		case aarp.ResponseOp:
+			ce.Write(zap.String("op", "response"))
+		case aarp.ProbeOp:
+			ce.Write(zap.String("op", "probe"))
+		default:
+			ce.Write(zap.Uint16("op", uint16(a.Opcode)))
+		}
+	}
+}
+
+func (g *Group) logAppleTalkPacket(packet ethertalk.Packet) {
+	log := g.log.With(zap.String("protocol", "ddp"))
+	d := ddp.ExtPacket{}
+	err := ddp.ExtUnmarshal(packet.Payload, &d)
+	if err != nil {
+		log.With(zap.Error(err)).Error("unmarshal failed")
+		return
+	}
+
+	if ce := log.Check(zap.DebugLevel, "packet"); ce != nil {
+		ce.Write(
+			zap.String("dst", fmt.Sprintf("%d.%d.%d", d.DstNet, d.DstNode, d.DstSocket)),
+			zap.String("src", fmt.Sprintf("%d.%d.%d", d.SrcNet, d.SrcNode, d.SrcSocket)),
+			zap.Uint8("proto", d.Proto),
+			zap.Uint16("cksum", d.Cksum),
+			zap.String("data", hex(d.Data)),
+		)
+	}
+}
+
+func hex(data []byte) string {
+	buf := bytes.Buffer{}
+	for i, b := range data {
+		if i > 0 && i%4 == 0 {
+			fmt.Fprint(&buf, " ")
+		}
+		fmt.Fprintf(&buf, "%02x", b)
+	}
+	return string(buf.Bytes())
 }

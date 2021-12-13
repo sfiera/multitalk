@@ -37,7 +37,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sfiera/multitalk/internal/bridge"
-	"github.com/sfiera/multitalk/internal/dbg"
 	"github.com/sfiera/multitalk/internal/raw"
 	"github.com/sfiera/multitalk/internal/tcp"
 	"github.com/sfiera/multitalk/internal/udp"
@@ -65,13 +64,17 @@ func Main() {
 		os.Exit(0)
 	}
 
-	log, err := zap.NewDevelopment()
+	cfg := zap.NewDevelopmentConfig()
+	if !*debug {
+		cfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	}
+	log, err := cfg.Build()
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
-	g := bridge.NewGroup()
+	g := bridge.NewGroup(log)
 	err = bridges(context.Background(), log, g)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -120,9 +123,5 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 		tcp.Serve(ctx, log, grp)
 	}
 
-	if *debug {
-		log := dbg.Logger(log)
-		grp.Add(log.Start(ctx))
-	}
 	return nil
 }
