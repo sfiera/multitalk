@@ -93,7 +93,7 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 		if err != nil {
 			return err
 		}
-		grp.Add(et.Start(ctx))
+		grp.Add(et.Start(ctx, log))
 	}
 
 	for _, dev := range *multi {
@@ -101,7 +101,7 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 		if err != nil {
 			return err
 		}
-		grp.Add(udp.Start(ctx))
+		grp.Add(udp.Start(ctx, log))
 	}
 
 	for _, s := range *client {
@@ -109,7 +109,7 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 		if err != nil {
 			return err
 		}
-		grp.Add(tcp.Start(ctx))
+		grp.Add(tcp.Start(ctx, log))
 	}
 
 	for _, s := range *server {
@@ -117,7 +117,7 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 		if err != nil {
 			return err
 		}
-		tcp.Serve(ctx, grp)
+		tcp.Serve(ctx, log, grp)
 	}
 
 	if *debug {

@@ -32,11 +32,11 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"go.uber.org/zap"
 
 	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
@@ -82,14 +82,19 @@ func EtherTalk(dev string) (b *bridge, err error) {
 	return b, nil
 }
 
-func (b *bridge) Start(ctx context.Context) (
+func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
+	log = log.With(
+		zap.String("bridge", "raw"),
+		zap.String("dev", b.dev),
+		zap.String("eth", b.eth.String()),
+	)
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(recvCh)
-	go b.transmit(sendCh)
+	go b.capture(log, recvCh)
+	go b.transmit(log, sendCh)
 	return sendCh, recvCh
 }
 
@@ -113,14 +118,14 @@ func (b *bridge) setupCapture(dev string) (capturer, error) {
 	return capturer, nil
 }
 
-func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
+func (b *bridge) capture(log *zap.Logger, recvCh chan<- ethertalk.Packet) {
 	defer close(recvCh)
 
 	localAddrs := map[ethernet.Addr]bool{}
 	for {
 		data, ci, err := b.capturer.ReadPacketData()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "read packet %s: %s\n", b.dev, err.Error())
+			log.With(zap.Error(err)).Error("read packet failed")
 			return
 		}
 		if ci.CaptureLength != ci.Length {
@@ -129,7 +134,7 @@ func (b *bridge) capture(recvCh chan<- ethertalk.Packet) {
 		packet := ethertalk.Packet{}
 		err = ethertalk.Unmarshal(data, &packet)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "localtalk recv: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("unmarshal failed")
 			continue
 		}
 		b.packet_handler(recvCh, packet, localAddrs)
@@ -152,7 +157,6 @@ func (b *bridge) packet_handler(
 	// If it is, don't bother sending it over the bridge as the
 	// recipient is local.
 	if localAddrs[packet.Dst] {
-		// DebugLog("packet_handler returned, skipping local packet%s", "\n")
 		return
 	}
 
@@ -161,11 +165,9 @@ func (b *bridge) packet_handler(
 	localAddrs[packet.Src] = true
 
 	send <- packet
-	// DebugLog("Wrote packet of size %d\n", len(packet))
 }
 
 func (b *bridge) setupTransmit(dev string) (transmitter, error) {
-	// DebugLog("Using device: %s\n", dev);
 	transmitter, err := pcap.OpenLive(dev, 1, false, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
@@ -173,7 +175,7 @@ func (b *bridge) setupTransmit(dev string) (transmitter, error) {
 	return transmitter, nil
 }
 
-func (b *bridge) transmit(ch <-chan ethertalk.Packet) {
+func (b *bridge) transmit(log *zap.Logger, ch <-chan ethertalk.Packet) {
 	for packet := range ch {
 		// Rewrite the source of the packet, so that capture() will know
 		// not to forward it back and create a loop.
@@ -181,14 +183,12 @@ func (b *bridge) transmit(ch <-chan ethertalk.Packet) {
 
 		bin, err := ethertalk.Marshal(packet)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "localtalk send: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("marshal failed")
 			continue
 		}
 		err = b.transmitter.WritePacketData(bin)
-		// DebugLog("pcap_sendpacket returned %d\n", pret);
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "write packet: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("write packet")
 		}
-		// The capture thread will free these
 	}
 }

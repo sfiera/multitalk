@@ -33,6 +33,8 @@ import (
 	"fmt"
 	"net"
 
+	"go.uber.org/zap"
+
 	"github.com/sfiera/multitalk/internal/bridge"
 )
 
@@ -48,14 +50,18 @@ func TCPServer(listen string) (*server, error) {
 	return &server{l}, nil
 }
 
-func (s *server) Serve(ctx context.Context, grp *bridge.Group) {
+func (s *server) Serve(ctx context.Context, log *zap.Logger, grp *bridge.Group) {
 	go func() {
 		for {
 			c, err := s.listen.Accept()
 			if err != nil {
 				continue
 			}
-			grp.Add((&client{c}).Start(ctx))
+			log.With(
+				zap.String("bridge", "tcp"),
+				zap.Stringer("remoteAddr", c.RemoteAddr()),
+			).Info("opened")
+			grp.Add((&client{c}).Start(ctx, log))
 		}
 	}()
 }

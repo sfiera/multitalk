@@ -31,9 +31,12 @@ package tcp
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"net"
-	"os"
+
+	"go.uber.org/zap"
 
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
@@ -50,22 +53,23 @@ func TCPClient(server string) (*client, error) {
 	return &client{conn}, nil
 }
 
-func (c *client) Start(ctx context.Context) (
+func (c *client) Start(ctx context.Context, log *zap.Logger) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
+	log = log.With(zap.String("bridge", "tcp"))
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go c.capture(ctx, recvCh)
-	go c.transmit(sendCh)
+	go c.capture(ctx, log, recvCh)
+	go c.transmit(ctx, log, sendCh)
 	return sendCh, recvCh
 }
 
-func (c *client) transmit(sendCh <-chan ethertalk.Packet) {
+func (c *client) transmit(ctx context.Context, log *zap.Logger, sendCh <-chan ethertalk.Packet) {
 	for packet := range sendCh {
 		bin, err := ethertalk.Marshal(packet)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "tcp send: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("send failed")
 			continue
 		}
 		_ = binary.Write(c.conn, binary.BigEndian, uint32(len(bin)))
@@ -73,24 +77,28 @@ func (c *client) transmit(sendCh <-chan ethertalk.Packet) {
 	}
 }
 
-func (c *client) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
+func (c *client) capture(ctx context.Context, log *zap.Logger, recvCh chan<- ethertalk.Packet) {
 	defer close(recvCh)
 	go func() {
 		<-ctx.Done()
 		c.conn.Close()
 	}()
+	log = log.With(zap.Stringer("remoteAddr", c.conn.RemoteAddr()))
 
 	for {
 		// receive a frame and send it out on the net
 		length := uint32(0)
 		err := binary.Read(c.conn, binary.BigEndian, &length)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+		if errors.Is(err, io.EOF) {
+			log.Info("closed")
+			return
+		} else if err != nil {
+			log.With(zap.Error(err)).Error("recv length failed")
 			return
 		}
 
 		if length > 4096 {
-			fmt.Fprintf(os.Stderr, "Received length is invalid: %d vs %d\n", length, length)
+			log.With(zap.Error(err), zap.Uint32("length", length)).Error("invalid length")
 			continue
 		}
 		// DebugLog("receiving packet of length: %u\n", length);
@@ -98,7 +106,7 @@ func (c *client) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 		data := make([]byte, length)
 		_, err = c.conn.Read(data)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("recv packet failed")
 			return
 		}
 		// DebugLog("Successfully received packet\n%s", "");
@@ -106,7 +114,7 @@ func (c *client) capture(ctx context.Context, recvCh chan<- ethertalk.Packet) {
 		packet := ethertalk.Packet{}
 		err = ethertalk.Unmarshal(data, &packet)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "tcp recv: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("unmarshal failed")
 			continue
 		}
 

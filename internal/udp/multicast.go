@@ -41,6 +41,7 @@ import (
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 	"github.com/sfiera/multitalk/pkg/llap"
 	"github.com/sfiera/multitalk/pkg/ltou"
+	"go.uber.org/zap"
 )
 
 type bridge struct {
@@ -76,18 +77,23 @@ func Multicast(iface string, network ddp.Network) (*bridge, error) {
 	return &b, nil
 }
 
-func (b *bridge) Start(ctx context.Context) (
+func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
+	log = log.With(
+		zap.String("bridge", "udp"),
+		zap.String("iface", b.iface.Name),
+	)
 	sendCh := make(chan ethertalk.Packet)
 	recvCh := make(chan ethertalk.Packet)
-	go b.capture(ctx, recvCh)
-	go b.transmit(sendCh, recvCh)
+	go b.capture(ctx, log, recvCh)
+	go b.transmit(log, sendCh, recvCh)
 	return sendCh, recvCh
 }
 
 func (b *bridge) transmit(
+	log *zap.Logger,
 	sendCh <-chan ethertalk.Packet,
 	recvCh chan<- ethertalk.Packet,
 ) {
@@ -97,19 +103,19 @@ func (b *bridge) transmit(
 			recvCh <- *resp
 			continue
 		} else if conv == nil {
-			fmt.Fprintf(os.Stderr, "send udp: conversion failed\n")
+			log.Error("convert failed")
 			continue
 		}
 
 		data, err := ltou.Marshal(*conv)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "send udp: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("marshal failed")
 			continue
 		}
 
 		_, err = b.conn.WriteToUDP(data, ltou.MulticastAddr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "send udp: %s\n", err.Error())
+			log.With(zap.Error(err)).Error("send failed")
 		}
 	}
 }
@@ -218,6 +224,7 @@ func (b *bridge) markProxyForNode(node ddp.Node) {
 
 func (b *bridge) capture(
 	ctx context.Context,
+	log *zap.Logger,
 	recvCh chan<- ethertalk.Packet,
 ) {
 	defer close(recvCh)
