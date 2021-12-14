@@ -68,6 +68,16 @@ type (
 	}
 )
 
+const (
+	ProtoRTMPResp = 0x01
+	ProtoNBP      = 0x02
+	ProtoATP      = 0x03
+	ProtoAEP      = 0x04
+	ProtoRTMPReq  = 0x05
+	ProtoZIP      = 0x06
+	ProtoADSP     = 0x07
+)
+
 // Unmarshals a packet from bytes.
 func Unmarshal(data []byte, pak *Packet) error {
 	r := bytes.NewReader(data)

@@ -165,10 +165,31 @@ func (g *Group) logAppleTalkPacket(packet ethertalk.Packet) {
 		ce.Write(
 			zap.String("dst", fmt.Sprintf("%d.%d.%d", d.DstNet, d.DstNode, d.DstSocket)),
 			zap.String("src", fmt.Sprintf("%d.%d.%d", d.SrcNet, d.SrcNode, d.SrcSocket)),
-			zap.Uint8("proto", d.Proto),
+			ddpProto("proto", d.Proto),
 			zap.Uint16("cksum", d.Cksum),
 			zap.String("data", hex(d.Data)),
 		)
+	}
+}
+
+func ddpProto(key string, val uint8) zap.Field {
+	switch val {
+	case ddp.ProtoRTMPResp:
+		return zap.String("proto", "rtmp/resp")
+	case ddp.ProtoNBP:
+		return zap.String("proto", "nbp")
+	case ddp.ProtoATP:
+		return zap.String("proto", "atp")
+	case ddp.ProtoAEP:
+		return zap.String("proto", "aep")
+	case ddp.ProtoRTMPReq:
+		return zap.String("proto", "rtmp/req")
+	case ddp.ProtoZIP:
+		return zap.String("proto", "zip")
+	case ddp.ProtoADSP:
+		return zap.String("proto", "adsp")
+	default:
+		return zap.Uint8("proto", val)
 	}
 }
 
