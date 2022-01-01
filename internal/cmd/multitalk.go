@@ -52,10 +52,9 @@ var (
 	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
 	client  = pflag.StringArrayP("tcp-client", "t", []string{}, "address to dial via TCP")
 	server  = pflag.StringArrayP("tcp-server", "T", []string{}, "address to listen via TCP")
+	network = pflag.Uint16P("network", "n", 0xff00, "network number for LToU bridging")
 	debug   = pflag.BoolP("debug", "d", false, "log packets")
 	version = pflag.BoolP("version", "v", false, "Display version & exit")
-
-	defaultNet = ddp.Network(0xff00)
 )
 
 func Main() {
@@ -100,7 +99,7 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 	}
 
 	for _, dev := range *multi {
-		udp, err := udp.Multicast(dev, defaultNet)
+		udp, err := udp.Multicast(dev, ddp.Network(*network))
 		if err != nil {
 			return err
 		}
