@@ -46,6 +46,15 @@ func TestSizes(t *testing.T) {
 		name:  "zero",
 		input: "\x00",
 		want:  0xf078,
+	}, {
+		name:  "string",
+		input: "LocalTalk",
+		want:  0xc5a1,
+	}, {
+		name:  "trailing_fcs",
+		input: "LocalTalk\xa1\xc5",
+		want:  0x0f47,
+		// Strings ended with a correct FCS should always yield 0x0f47.
 	}} {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := assert.New(t)
