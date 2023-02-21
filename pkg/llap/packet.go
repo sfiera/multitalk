@@ -65,9 +65,11 @@ func Unmarshal(data []byte, pak *Packet) error {
 		return fmt.Errorf("read udp header: %s", err.Error())
 	}
 
-	pak.Payload, err = ioutil.ReadAll(r)
+	payload, err := ioutil.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("read udp body: %s", err.Error())
+	} else if len(payload) > 0 {
+		pak.Payload = payload
 	}
 
 	return nil
