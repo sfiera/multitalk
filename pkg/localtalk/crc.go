@@ -33,6 +33,8 @@ import (
 
 var crcTable = crc16.MakeTable(crc16.CRC16_X_25)
 
+const ValidCRC = uint16(0x0f47)
+
 func SumCRC(data []byte) uint16 {
 	return crc16.Checksum(data, crcTable)
 }

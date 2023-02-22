@@ -53,7 +53,7 @@ func TestSizes(t *testing.T) {
 	}, {
 		name:  "trailing_fcs",
 		input: "LocalTalk\xa1\xc5",
-		want:  0x0f47,
+		want:  ValidCRC,
 		// Strings ended with a correct FCS should always yield 0x0f47.
 	}} {
 		t.Run(tt.name, func(t *testing.T) {
