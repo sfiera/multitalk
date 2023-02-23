@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	versionString = "multitalk 0.1"
+	versionString = "multitalk 0.2.0"
 )
 
 var (
