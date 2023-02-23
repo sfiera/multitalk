@@ -33,63 +33,47 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sync"
 
-	"github.com/sfiera/multitalk/pkg/aarp"
-	"github.com/sfiera/multitalk/pkg/ddp"
-	"github.com/sfiera/multitalk/pkg/ethernet"
-	"github.com/sfiera/multitalk/pkg/ethertalk"
+	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/pkg/llap"
 	"github.com/sfiera/multitalk/pkg/ltou"
 	"go.uber.org/zap"
 )
 
-type router struct {
-	network ddp.Network
-
-	nodes   map[ddp.Node]bool
-	nodesMu sync.Mutex
-
-	eth ethernet.Addr
-
-	bridge bridge
-}
-
-type bridge struct {
+type multicast struct {
 	pid   uint32
 	iface *net.Interface
 	conn  *net.UDPConn
 }
 
-func Multicast(iface string, network ddp.Network) (*router, error) {
+func Multicast(iface string) (bridge.Bridge, []byte, error) {
 	i, err := net.InterfaceByName(iface)
 	if err != nil {
-		return nil, fmt.Errorf("interface %s: %s", iface, err.Error())
+		return nil, nil, fmt.Errorf("interface %s: %s", iface, err.Error())
 	}
 
-	r := router{
-		network: network,
-		nodes:   map[ddp.Node]bool{},
-		bridge: bridge{
-			pid:   uint32(os.Getpid()),
-			iface: i,
-		},
+	m := multicast{
+		pid:   uint32(os.Getpid()),
+		iface: i,
 	}
-	copy(r.eth[:], i.HardwareAddr)
 
-	r.bridge.conn, err = net.ListenMulticastUDP("udp", i, ltou.MulticastAddr)
+	m.conn, err = net.ListenMulticastUDP("udp", i, ltou.MulticastAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen %s: %s", iface, err.Error())
+		return nil, nil, fmt.Errorf("listen %s: %s", iface, err.Error())
 	}
-	return &r, nil
+	return &m, i.HardwareAddr, nil
 }
 
 func pipe[T any](ch chan T) (<-chan T, chan<- T) { return ch, ch }
 
-func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
+func (b *multicast) Start(ctx context.Context, log *zap.Logger) (
 	send chan<- llap.Packet,
 	recv <-chan llap.Packet,
 ) {
+	log = log.With(
+		zap.String("bridge", "udp"),
+		zap.String("iface", b.iface.Name),
+	)
 	sendInCh, sendOutCh := pipe(make(chan llap.Packet))
 	recvInCh, recvOutCh := pipe(make(chan llap.Packet))
 	go b.capture(ctx, log, recvOutCh)
@@ -97,43 +81,7 @@ func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
 	return sendOutCh, recvInCh
 }
 
-func (r *router) Start(ctx context.Context, log *zap.Logger) (
-	send chan<- ethertalk.Packet,
-	recv <-chan ethertalk.Packet,
-) {
-	log = log.With(
-		zap.String("bridge", "udp"),
-		zap.String("iface", r.bridge.iface.Name),
-	)
-	sendLLAPOutCh, recvLLAPInCh := r.bridge.Start(ctx, log)
-	sendELAPInCh, sendELAPOutCh := pipe(make(chan ethertalk.Packet))
-	recvELAPInCh, recvELAPOutCh := pipe(make(chan ethertalk.Packet))
-	go r.translateCapture(ctx, log, recvLLAPInCh, recvELAPOutCh)
-	go r.translateTransmit(ctx, log, sendELAPInCh, sendLLAPOutCh, recvELAPOutCh)
-	return sendELAPOutCh, recvELAPInCh
-}
-
-func (r *router) translateTransmit(
-	ctx context.Context,
-	log *zap.Logger,
-	elapCh <-chan ethertalk.Packet,
-	llapCh chan<- llap.Packet,
-	respCh chan<- ethertalk.Packet,
-) {
-	for packet := range elapCh {
-		llap, resp := r.elapToLLAP(packet)
-		if resp != nil {
-			respCh <- *resp
-			continue
-		} else if llap == nil {
-			log.Error("convert failed")
-			continue
-		}
-		llapCh <- *llap
-	}
-}
-
-func (b *bridge) transmit(
+func (b *multicast) transmit(
 	ctx context.Context,
 	log *zap.Logger,
 	llapCh <-chan llap.Packet,
@@ -155,108 +103,7 @@ func (b *bridge) transmit(
 	}
 }
 
-func (r *router) elapToLLAP(packet ethertalk.Packet) (
-	converted *llap.Packet,
-	response *ethertalk.Packet,
-) {
-	switch packet.SNAPProto {
-	case ethertalk.AppleTalkProto:
-		return r.elapToLLAPDDP(packet), nil
-
-	case ethertalk.AARPProto:
-		return r.elapToLLAPAARP(packet)
-
-	default:
-		return nil, nil
-	}
-}
-
-func (r *router) isLocal(net ddp.Network) bool {
-	return net == 0 || net == r.network
-}
-
-func (r *router) elapToLLAPDDP(packet ethertalk.Packet) *llap.Packet {
-	ext := ddp.ExtPacket{}
-	err := ddp.ExtUnmarshal(packet.Payload, &ext)
-	if err != nil {
-		return nil
-	}
-
-	if r.isLocal(ext.SrcNet) && r.isLocal(ext.DstNet) {
-		short := ddp.ExtToShort(ext)
-		result, err := llap.AppleTalk(ext.DstNode, ext.SrcNode, short)
-		if err != nil {
-			return nil
-		}
-		return result
-	} else {
-		result, err := llap.ExtAppleTalk(ext.DstNode, ext.SrcNode, ext)
-		if err != nil {
-			return nil
-		}
-		return result
-	}
-}
-
-func (r *router) elapToLLAPAARP(packet ethertalk.Packet) (
-	converted *llap.Packet,
-	response *ethertalk.Packet,
-) {
-	a := aarp.Packet{}
-	err := aarp.Unmarshal(packet.Payload, &a)
-	if err != nil {
-		return nil, nil
-	}
-
-	if !r.isLocal(a.Src.Proto.Network) || !r.isLocal(a.Dst.Proto.Network) {
-		return nil, nil
-	}
-
-	switch a.Opcode {
-	case aarp.ProbeOp:
-		// “Is this AppleTalk node ID in use by anyone?”
-		return llap.Enq(a.Dst.Proto.Node, a.Src.Proto.Node), nil
-
-	case aarp.ResponseOp:
-		// “Yes, sorry, I’m already using that node ID.”
-		return llap.Ack(a.Dst.Proto.Node, a.Src.Proto.Node), nil
-
-	case aarp.RequestOp:
-		// Request to map an AppleTalk address to a hardware address (MAC).
-		// Don’t translate to UDP, since there’s no corresponding request.
-		// Check if the target machine is one that has broadcast UDP packets.
-		// If it has, then report this machine’s hardware address as the
-		// target for the queried AppleTalk address.
-		if !r.isProxyForNode(a.Dst.Proto.Node) {
-			return nil, nil
-		}
-		resp, err := ethertalk.AARP(r.eth, aarp.Response(aarp.AddrPair{
-			Hardware: r.eth,
-			Proto:    a.Dst.Proto,
-		}, a.Src))
-		if err != nil {
-			return nil, nil
-		}
-		return nil, resp
-
-	default:
-		return nil, nil
-	}
-}
-
-func (r *router) isProxyForNode(node ddp.Node) bool {
-	r.nodesMu.Lock()
-	defer r.nodesMu.Unlock()
-	return r.nodes[node]
-}
-
-func (r *router) markProxyForNode(node ddp.Node) {
-	r.nodesMu.Lock()
-	defer r.nodesMu.Unlock()
-	r.nodes[node] = true
-}
-
-func (b *bridge) capture(
+func (b *multicast) capture(
 	ctx context.Context,
 	log *zap.Logger,
 	recvCh chan<- llap.Packet,
@@ -291,22 +138,7 @@ func (b *bridge) capture(
 	}
 }
 
-func (r *router) translateCapture(
-	ctx context.Context,
-	log *zap.Logger,
-	llapCh <-chan llap.Packet,
-	elapCh chan<- ethertalk.Packet,
-) {
-	for packet := range llapCh {
-		conv := r.llapToELAP(packet)
-		if conv != nil {
-			r.markProxyForNode(packet.SrcNode)
-			elapCh <- *conv
-		}
-	}
-}
-
-func (b *bridge) isSender(from *net.UDPAddr, packet ltou.Packet) bool {
+func (b *multicast) isSender(from *net.UDPAddr, packet ltou.Packet) bool {
 	if packet.Pid != b.pid {
 		return false
 	}
@@ -322,75 +154,4 @@ func (b *bridge) isSender(from *net.UDPAddr, packet ltou.Packet) bool {
 		}
 	}
 	return false
-}
-
-func (r *router) llapToELAP(packet llap.Packet) *ethertalk.Packet {
-	switch packet.Kind {
-	case llap.TypeDDP:
-		return r.llapToELAPDDP(packet)
-	case llap.TypeExtDDP:
-		return r.llapToELAPExtDDP(packet)
-	case llap.TypeEnq:
-		return r.llapToELAPProbe(packet)
-	case llap.TypeAck:
-		return r.llapToELAPAck(packet)
-	default:
-		return nil
-	}
-}
-
-func (r *router) llapToELAPDDP(packet llap.Packet) *ethertalk.Packet {
-	d := ddp.Packet{}
-	err := ddp.Unmarshal(packet.Payload, &d)
-	if err != nil {
-		return nil
-	}
-
-	ext := ddp.ShortToExt(d, r.network, packet.DstNode, packet.SrcNode)
-	out, err := ethertalk.AppleTalk(r.eth, ext)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-func (r *router) llapToELAPExtDDP(packet llap.Packet) *ethertalk.Packet {
-	d := ddp.ExtPacket{}
-	err := ddp.ExtUnmarshal(packet.Payload, &d)
-	if err != nil {
-		return nil
-	}
-	out, err := ethertalk.AppleTalk(r.eth, d)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-func (r *router) llapToELAPProbe(packet llap.Packet) *ethertalk.Packet {
-	out, err := ethertalk.AARP(
-		r.eth,
-		aarp.Probe(r.eth, ddp.Addr{Network: r.network, Node: packet.DstNode}),
-	)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-func (r *router) llapToELAPAck(packet llap.Packet) *ethertalk.Packet {
-	out, err := ethertalk.AARP(r.eth, aarp.Response(
-		aarp.AddrPair{
-			Hardware: r.eth,
-			Proto:    ddp.Addr{Network: r.network, Node: packet.SrcNode},
-		},
-		aarp.AddrPair{
-			Hardware: r.eth,
-			Proto:    ddp.Addr{Network: r.network, Node: packet.DstNode},
-		},
-	))
-	if err != nil {
-		return nil
-	}
-	return out
 }

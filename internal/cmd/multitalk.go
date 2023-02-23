@@ -99,11 +99,11 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 	}
 
 	for _, dev := range *multi {
-		udp, err := udp.Multicast(dev, ddp.Network(*network))
+		m, hwAddr, err := udp.Multicast(dev)
 		if err != nil {
 			return err
 		}
-		grp.Add(udp.Start(ctx, log))
+		grp.Add(bridge.Extend(m, ddp.Network(*network), hwAddr).Start(ctx, log))
 	}
 
 	for _, s := range *client {
