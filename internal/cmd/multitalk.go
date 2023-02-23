@@ -38,6 +38,7 @@ import (
 
 	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/internal/raw"
+	"github.com/sfiera/multitalk/internal/serial"
 	"github.com/sfiera/multitalk/internal/tcp"
 	"github.com/sfiera/multitalk/internal/udp"
 	"github.com/sfiera/multitalk/pkg/ddp"
@@ -50,6 +51,7 @@ const (
 var (
 	ether   = pflag.StringArrayP("ethertalk", "e", []string{}, "interface to bridge via EtherTalk")
 	multi   = pflag.StringArrayP("multicast", "m", []string{}, "interface to bridge via UDP multicast")
+	tash    = pflag.StringArrayP("serial", "s", []string{}, "serial device to bridge via TashTalk")
 	client  = pflag.StringArrayP("tcp-client", "t", []string{}, "address to dial via TCP")
 	server  = pflag.StringArrayP("tcp-server", "T", []string{}, "address to listen via TCP")
 	network = pflag.Uint16P("network", "n", 0xff00, "network number for LToU bridging")
@@ -83,7 +85,7 @@ func Main() {
 }
 
 func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
-	niface := len(*client) + len(*server) + len(*ether) + len(*multi)
+	niface := len(*client) + len(*server) + len(*ether) + len(*multi) + len(*tash)
 	if niface == 0 {
 		return fmt.Errorf("no interfaces specified")
 	} else if (niface == 1) && (len(*server) == 0) && !*debug {
@@ -99,11 +101,19 @@ func bridges(ctx context.Context, log *zap.Logger, grp *bridge.Group) error {
 	}
 
 	for _, dev := range *multi {
-		udp, err := udp.Multicast(dev, ddp.Network(*network))
+		m, hwAddr, err := udp.Multicast(dev)
 		if err != nil {
 			return err
 		}
-		grp.Add(udp.Start(ctx, log))
+		grp.Add(bridge.Extend(m, ddp.Network(*network), hwAddr).Start(ctx, log))
+	}
+
+	for _, dev := range *tash {
+		tt, hwAddr, err := serial.TashTalk(dev)
+		if err != nil {
+			return err
+		}
+		grp.Add(bridge.Extend(tt, ddp.Network(*network), hwAddr).Start(ctx, log))
 	}
 
 	for _, s := range *client {

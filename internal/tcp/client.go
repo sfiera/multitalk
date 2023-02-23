@@ -38,6 +38,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
@@ -45,7 +46,7 @@ type client struct {
 	conn net.Conn
 }
 
-func TCPClient(server string) (*client, error) {
+func TCPClient(server string) (bridge.ExtBridge, error) {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %s", server, err.Error())

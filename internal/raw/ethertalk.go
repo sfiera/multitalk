@@ -38,12 +38,13 @@ import (
 	"github.com/google/gopacket/pcap"
 	"go.uber.org/zap"
 
+	"github.com/sfiera/multitalk/internal/bridge"
 	"github.com/sfiera/multitalk/pkg/ethernet"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
 )
 
 type (
-	bridge struct {
+	elap struct {
 		dev         string
 		eth         ethernet.Addr
 		mu          sync.Mutex
@@ -60,13 +61,13 @@ type (
 	}
 )
 
-func EtherTalk(dev string) (b *bridge, err error) {
+func EtherTalk(dev string) (bridge.ExtBridge, error) {
 	i, err := net.InterfaceByName(dev)
 	if err != nil {
 		return nil, fmt.Errorf("interface %s: %s", dev, err.Error())
 	}
 
-	b = &bridge{dev: dev}
+	b := &elap{dev: dev}
 	copy(b.eth[:], i.HardwareAddr)
 
 	b.capturer, err = b.setupCapture(dev)
@@ -82,7 +83,7 @@ func EtherTalk(dev string) (b *bridge, err error) {
 	return b, nil
 }
 
-func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
+func (b *elap) Start(ctx context.Context, log *zap.Logger) (
 	send chan<- ethertalk.Packet,
 	recv <-chan ethertalk.Packet,
 ) {
@@ -98,7 +99,7 @@ func (b *bridge) Start(ctx context.Context, log *zap.Logger) (
 	return sendCh, recvCh
 }
 
-func (b *bridge) setupCapture(dev string) (capturer, error) {
+func (b *elap) setupCapture(dev string) (capturer, error) {
 	capturer, err := pcap.OpenLive(dev, 4096, true, pcap.BlockForever)
 	if err != nil {
 		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
@@ -118,7 +119,7 @@ func (b *bridge) setupCapture(dev string) (capturer, error) {
 	return capturer, nil
 }
 
-func (b *bridge) capture(log *zap.Logger, recvCh chan<- ethertalk.Packet) {
+func (b *elap) capture(log *zap.Logger, recvCh chan<- ethertalk.Packet) {
 	defer close(recvCh)
 
 	localAddrs := map[ethernet.Addr]bool{}
@@ -141,7 +142,7 @@ func (b *bridge) capture(log *zap.Logger, recvCh chan<- ethertalk.Packet) {
 	}
 }
 
-func (b *bridge) packet_handler(
+func (b *elap) packet_handler(
 	send chan<- ethertalk.Packet,
 	packet ethertalk.Packet,
 	localAddrs map[ethernet.Addr]bool,
@@ -167,7 +168,7 @@ func (b *bridge) packet_handler(
 	send <- packet
 }
 
-func (b *bridge) setupTransmit(dev string) (transmitter, error) {
+func (b *elap) setupTransmit(dev string) (transmitter, error) {
 	transmitter, err := pcap.OpenLive(dev, 1, false, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("open dev %s: %s", dev, err.Error())
@@ -175,7 +176,7 @@ func (b *bridge) setupTransmit(dev string) (transmitter, error) {
 	return transmitter, nil
 }
 
-func (b *bridge) transmit(log *zap.Logger, ch <-chan ethertalk.Packet) {
+func (b *elap) transmit(log *zap.Logger, ch <-chan ethertalk.Packet) {
 	for packet := range ch {
 		// Rewrite the source of the packet, so that capture() will know
 		// not to forward it back and create a loop.

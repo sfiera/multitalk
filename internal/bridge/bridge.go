@@ -38,6 +38,7 @@ import (
 	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
 	"github.com/sfiera/multitalk/pkg/ethertalk"
+	"github.com/sfiera/multitalk/pkg/llap"
 )
 
 type (
@@ -52,7 +53,14 @@ type (
 	}
 
 	Bridge interface {
-		Start(ctx context.Context) (
+		Start(ctx context.Context, log *zap.Logger) (
+			send chan<- llap.Packet,
+			recv <-chan llap.Packet,
+		)
+	}
+
+	ExtBridge interface {
+		Start(ctx context.Context, log *zap.Logger) (
 			send chan<- ethertalk.Packet,
 			recv <-chan ethertalk.Packet,
 		)
