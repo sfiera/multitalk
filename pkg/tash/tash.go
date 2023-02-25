@@ -169,7 +169,7 @@ func (e *Encoder) Encode(pak llap.Packet) error {
 	}
 
 	switch pak.Kind {
-	case llap.TypeDDP:
+	case llap.TypeDDP, llap.TypeExtDDP:
 		if len(pak.Payload) < 2 {
 			return fmt.Errorf("invalid DDP packet length: %d", len(pak.Payload))
 		}

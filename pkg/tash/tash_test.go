@@ -539,17 +539,6 @@ func TestEncodeBadPackets(t *testing.T) {
 			Payload: []byte{0x00, 0x04, 0x03},
 		},
 		wantErr: `DDP packet length mismatch: 3 vs. 4`,
-	}, {
-		name: "extended-network",
-		packet: llap.Packet{
-			Header: llap.Header{
-				DstNode: 2,
-				SrcNode: 1,
-				Kind:    llap.TypeExtDDP,
-			},
-			Payload: []byte{0x00, 0x02},
-		},
-		wantErr: `invalid packet type: $02`,
 	}} {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := assert.New(t)
