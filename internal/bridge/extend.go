@@ -30,6 +30,7 @@ package bridge
 import (
 	"context"
 	"sync"
+	"fmt"
 
 	"github.com/sfiera/multitalk/pkg/aarp"
 	"github.com/sfiera/multitalk/pkg/ddp"
@@ -86,12 +87,12 @@ func (r *router) translateTransmit(
 	respCh chan<- ethertalk.Packet,
 ) {
 	for packet := range elapCh {
-		llap, resp := r.elapToLLAP(packet)
+		llap, resp, err := r.elapToLLAP(packet)
 		if resp != nil {
 			respCh <- *resp
 			continue
 		} else if llap == nil {
-			log.Error("convert failed")
+			log.Error(fmt.Sprintf("convert failed: err %v", err))
 			continue
 		}
 		llapCh <- *llap
@@ -101,16 +102,19 @@ func (r *router) translateTransmit(
 func (r *router) elapToLLAP(packet ethertalk.Packet) (
 	converted *llap.Packet,
 	response *ethertalk.Packet,
+	e error,
 ) {
 	switch packet.SNAPProto {
 	case ethertalk.AppleTalkProto:
-		return r.elapToLLAPDDP(packet), nil
+		c, err := r.elapToLLAPDDP(packet)
+		return c, nil, err
 
 	case ethertalk.AARPProto:
-		return r.elapToLLAPAARP(packet)
+		c, r := r.elapToLLAPAARP(packet)
+		return c, r, nil
 
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
 }
 
@@ -118,26 +122,26 @@ func (r *router) isLocal(net ddp.Network) bool {
 	return net == 0 || net == r.network
 }
 
-func (r *router) elapToLLAPDDP(packet ethertalk.Packet) *llap.Packet {
+func (r *router) elapToLLAPDDP(packet ethertalk.Packet) (*llap.Packet, error) {
 	ext := ddp.ExtPacket{}
 	err := ddp.ExtUnmarshal(packet.Payload, &ext)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	if r.isLocal(ext.SrcNet) && r.isLocal(ext.DstNet) {
 		short := ddp.ExtToShort(ext)
 		result, err := llap.AppleTalk(ext.DstNode, ext.SrcNode, short)
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		return result
+		return result, nil
 	} else {
 		result, err := llap.ExtAppleTalk(ext.DstNode, ext.SrcNode, ext)
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		return result
+		return result, nil
 	}
 }
 
